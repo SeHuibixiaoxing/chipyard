@@ -33,17 +33,28 @@ class WithMultiRoCCFromBuildRoCC(harts: Int*) extends Config((site, here, up) =>
   }
 })
 
+/** Config fragment to add DirectDMA to MultiRoCCKey for specific harts */
+class WithMultiRoCCDirectDMA(harts: Int*) extends Config((site, here, up) => {
+  case MultiRoCCKey => up(MultiRoCCKey, site) ++ harts.distinct.map { i =>
+    (i -> (up(MultiRoCCKey, site).getOrElse(i, Nil) :+ ((p: Parameters) => {
+      implicit val q = p
+      val dma = LazyModule(new gemmini.GemminiDirectDMA(OpcodeSet.custom2)(p))
+      dma
+    })))
+  }
+})
+
 class WithMultiRoCCGemmini[T <: Data : Arithmetic, U <: Data, V <: Data](
   harts: Int*)(gemminiConfig: GemminiArrayConfig[T,U,V] = GemminiConfigs.defaultConfig) extends Config((site, here, up) => {
   case MultiRoCCKey => up(MultiRoCCKey, site) ++ harts.distinct.map { i =>
-    (i -> Seq((p: Parameters) => {
+    val existingRoCCs = up(MultiRoCCKey, site).getOrElse(i, Nil)
+    val newGemmini = (p: Parameters) => {
       implicit val q = p
-      val gemmini = LazyModule(new Gemmini(gemminiConfig.copy(
-          // CTH: Set the gemmini_id to the hartid.
+      LazyModule(new Gemmini(gemminiConfig.copy(
           gemmini_id = i
       )))
-      gemmini
-    }))
+    }
+    (i -> (existingRoCCs :+ newGemmini))
   }
 })
 

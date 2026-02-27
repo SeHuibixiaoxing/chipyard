@@ -2,6 +2,8 @@
 
 CHIPYARD_STAGING_DIR := $(chipyard_dir)/sims/firesim-staging
 
+EXTRA_CHISEL_OPTIONS ?= --emit-legacy-sfc
+
 # target scala directories to copy into midas. used by TARGET_COPY_TO_MIDAS_SCALA_DIRS
 TARGET_COPY_TO_MIDAS_SCALA_DIRS := \
 	$(addprefix $(chipyard_dir)/generators/firechip/,bridgeinterfaces goldengateimplementations)
@@ -21,7 +23,7 @@ $(FIRRTL_FILE) $(ANNO_FILE) &: firesim_target_symlink_hook
 			CONFIG=$(TARGET_CONFIG) \
 			CONFIG_PACKAGE=$(TARGET_CONFIG_PACKAGE) \
 			GENERATOR_PACKAGE=chipyard \
-			EXTRA_CHISEL_OPTIONS=--emit-legacy-sfc \
+			EXTRA_CHISEL_OPTIONS="$(EXTRA_CHISEL_OPTIONS)" \
 			TB=unused \
 			TOP=unused
 	# $(long_name) must be same as Chipyard
