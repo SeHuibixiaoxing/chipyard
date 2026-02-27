@@ -21,6 +21,7 @@ class MemStreamerCmdBundle()(implicit p: Parameters) extends Bundle {
   val dest_info = Decoupled(new DstInfo) //to writer unit
   val bufs_completed = Input(UInt(64.W)) //from writer unit
   val no_writes_inflight = Input(Bool()) //from writer unit
+  val bus_write_bytes = Input(UInt(64.W)) //from writer unit
 }
 
 trait StreamingCommandRouter extends Module {

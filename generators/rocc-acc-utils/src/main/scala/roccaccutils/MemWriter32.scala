@@ -23,6 +23,7 @@ class MemWriter32(val cmd_que_depth: Int = 4, val write_cmp_flag:Boolean = true,
 
     val bufs_completed = Output(UInt(64.W))
     val no_writes_inflight = Output(Bool())
+    val bus_write_bytes = Output(UInt(64.W))
   })
 
   val incoming_writes_Q = Module(new Queue(new WriterBundle, cmd_que_depth))
@@ -236,6 +237,12 @@ class MemWriter32(val cmd_que_depth: Int = 4, val write_cmp_flag:Boolean = true,
       io.l2io.req.bits.size
     )
   }
+
+  val total_bus_write_bytes = RegInit(0.U(64.W))
+  when (mem_write_fire.fire()) {
+    total_bus_write_bytes := total_bus_write_bytes + bytes_to_write
+  }
+  io.bus_write_bytes := total_bus_write_bytes
 
   val bool_val = 1.U
   if (write_cmp_flag) {
