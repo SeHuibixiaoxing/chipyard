@@ -1,0 +1,39 @@
+[
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"Top.Foo"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"Top.Bar"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"Top.Foo.x"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"Top.Foo.y"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"Top"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"OtherTop"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"OtherTop.Foo.x"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"OtherTop.Bar"
+  },
+  {
+    "class":"firrtl2.passes.InlineAnnotation",
+    "target":"OtherTop.Foo.y"
+  }
+]
+
