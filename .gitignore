@@ -33,3 +33,6 @@ project/project/
 .vscode/
 tests/build/
 tmp/
+vivado.jou*
+vivado.log*
+AGENTS.md

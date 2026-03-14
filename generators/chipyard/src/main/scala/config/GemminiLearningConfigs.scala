@@ -293,6 +293,167 @@ class GemminiLearningConfigSpadNoC extends Config (
   new chipyard.config.AbstractConfig
 )
 
+class GemminiLearningConfigSpadNoCParametric(
+  numCores: Int,
+  x: Int,
+  y: Int,
+  sbusWidthBits: Int,
+  nMemoryChannels: Int,
+  freqMHz: Double,
+  meshRows: Int = 64,
+  meshColumns: Int = 64,
+) extends Config({
+  require(numCores > 0, s"numCores must be > 0, got $numCores")
+  require(x > 0, s"x must be > 0, got $x")
+  require(y > 0, s"y must be > 0, got $y")
+  require(numCores == x * y, s"numCores must equal x * y, got numCores=$numCores, x*y=${x * y}")
+  require(sbusWidthBits > 0 && sbusWidthBits % 8 == 0, s"sbusWidthBits must be a positive multiple of 8, got $sbusWidthBits")
+  require(nMemoryChannels > 0, s"nMemoryChannels must be > 0, got $nMemoryChannels")
+  require(freqMHz > 0.0, s"freqMHz must be > 0, got $freqMHz")
+  require(meshRows > 0, s"meshRows must be > 0, got $meshRows")
+  require(meshColumns > 0, s"meshColumns must be > 0, got $meshColumns")
+
+  // Put cores on an x*y rectangle (row-major), and grow NoC rows for non-core endpoints.
+  val coreNodes = (0 until numCores).map { i =>
+    val row = i / x
+    val col = i % x
+    row * x + col
+  }
+  val nonCoreEndpointCount = nMemoryChannels + 1 // system[i] endpoints + shared pbus/serial_tl endpoint
+  val extraRows = (nonCoreEndpointCount + x - 1) / x
+  val nocRows = y + extraRows
+  val nocCols = x
+  val firstNonCoreNode = x * y
+  val nonCoreNodes = (firstNonCoreNode until nocCols * nocRows).toSeq
+  require(nonCoreNodes.length >= nonCoreEndpointCount, "Internal error: NoC sizing underflow")
+
+  val systemNodes = nonCoreNodes.take(nMemoryChannels)
+  val pbusNode = nonCoreNodes(nMemoryChannels)
+  val coreIds = (0 until numCores).toSeq
+  val gemminiBeatBytes = sbusWidthBits / 8
+
+  val inNodeMappingEntries = {
+    // Constellation name matching is substring-based; add delimiters to avoid
+    // "Core 1"/"Gemmini1" ambiguously matching "Core 10"/"Gemmini10".
+    val coreEntries = coreNodes.zipWithIndex.map { case (node, i) => s"Core $i " -> node }
+    val gemminiEntries = coreNodes.zipWithIndex.map { case (node, i) => s"Gemmini$i-" -> node }
+    val dmaEntries = coreNodes.zipWithIndex.flatMap { case (node, i) =>
+      Seq(
+        s"[memloader][$i]" -> node,
+        s"[memwriter][$i]" -> node,
+      )
+    }
+    coreEntries ++ gemminiEntries ++ dmaEntries ++ Seq("serial_tl" -> pbusNode)
+  }
+
+  val outNodeMappingEntries = {
+    val gemminiEntries = coreNodes.zipWithIndex.map { case (node, i) => s"Gemmini$i-" -> node }
+    val systemEntries = systemNodes.zipWithIndex.map { case (node, i) => s"system[$i]" -> node }
+    gemminiEntries ++ systemEntries ++ Seq("pbus" -> pbusNode)
+  }
+
+  (new freechips.rocketchip.subsystem.WithoutTLMonitors
+    ++ new constellation.soc.WithSbusNoC(
+      constellation.protocol.SimpleTLNoCParams(
+        constellation.protocol.DiplomaticNetworkNodeMapping(
+          inNodeMapping = ListMap(inNodeMappingEntries: _*),
+          outNodeMapping = ListMap(outNodeMappingEntries: _*),
+        ),
+        constellation.noc.NoCParams(
+          topology        = TerminalRouter(Mesh2D(nocCols, nocRows)),
+          channelParamGen = (a, b) => UserChannelParams(Seq.fill(5) { UserVirtualChannelParams(8) }),
+          routingRelation = BlockingVirtualSubnetworksRouting(TerminalRouterRouting(Mesh2DEscapeRouting()), 5, 1),
+        ),
+      ),
+    )
+    // Remove default scratchpads from AbstractConfig (no SBUS scratchpad).
+    ++ new testchipip.soc.WithNoScratchpads()
+    ++ new chipyard.config.WithMultiRoCCGemmini(
+      coreIds: _*
+    )(
+      gemmini.GemminiConfigs.dummyConfig.copy(
+        meshRows = meshRows,
+        meshColumns = meshColumns,
+        dma_buswidth = sbusWidthBits,
+        shared_scratchpad_config = gemmini.SharedScratchpadConfig(
+          enable = true,
+          global_base_addr = BigInt("40000000", 16),
+          local_size_bytes = 1024 * 1024,
+          local_banks = 1,
+          local_bank_beat_bytes = gemminiBeatBytes,
+        ),
+      ),
+    )
+    ++ new chipyard.config.WithMultiRoCCDirectDMA(coreIds: _*)
+    ++ new chipyard.config.WithMultiRoCC
+    ++ new chipyard.config.WithInheritBusFrequencyAssignments
+    ++ new chipyard.config.WithUniformBusFrequencies(freqMHz)
+    ++ new chipyard.config.WithTileFrequency(freqMHz)
+    ++ new freechips.rocketchip.rocket.WithNBigCores(numCores)
+    ++ new freechips.rocketchip.subsystem.WithNBanks(nMemoryChannels)
+    ++ new chipyard.config.WithBroadcastManager
+    ++ new chipyard.config.WithSystemBusWidth(sbusWidthBits)
+    ++ new freechips.rocketchip.subsystem.WithNMemoryChannels(nMemoryChannels)
+    ++ new chipyard.config.AbstractConfig)
+})
+
+// A no-arg wrapper so this config can be selected directly via CONFIG=...
+class GemminiLearningConfigSpadNoCParametricDefault extends GemminiLearningConfigSpadNoCParametric(
+  numCores = 4,
+  x = 2,
+  y = 2,
+  sbusWidthBits = 64 * 8,
+  nMemoryChannels = 4,
+  freqMHz = 1000.0,
+)
+
+class GemminiLearningConfigSpadNoC4C2x2 extends GemminiLearningConfigSpadNoCParametric(
+  numCores = 4,
+  x = 2,
+  y = 2,
+  sbusWidthBits = 64 * 8,
+  nMemoryChannels = 4,
+  freqMHz = 1000.0,
+  meshRows = 8,
+  meshColumns = 8,
+)
+
+class GemminiLearningConfigSpadNoC16C4x4 extends GemminiLearningConfigSpadNoCParametric(
+  numCores = 16,
+  x = 4,
+  y = 4,
+  sbusWidthBits = 64 * 8,
+  nMemoryChannels = 4,
+  freqMHz = 1000.0,
+  // Keep FIRRTL below parser file-size limit during FireSim bitstream flow.
+  meshRows = 8,
+  meshColumns = 8,
+)
+
+class GemminiLearningConfigSpadNoC12C3x4 extends GemminiLearningConfigSpadNoCParametric(
+  numCores = 12,
+  x = 3,
+  y = 4,
+  sbusWidthBits = 64 * 8,
+  nMemoryChannels = 4,
+  freqMHz = 1000.0,
+  // Keep FIRRTL below parser file-size limit during FireSim bitstream flow.
+  meshRows = 8,
+  meshColumns = 8,
+)
+
+class GemminiLearningConfigSpadNoC8C4x2 extends GemminiLearningConfigSpadNoCParametric(
+  numCores = 8,
+  x = 4,
+  y = 2,
+  sbusWidthBits = 64 * 8,
+  nMemoryChannels = 4,
+  freqMHz = 1000.0,
+  // Keep FIRRTL below parser file-size limit during FireSim bitstream flow.
+  meshRows = 8,
+  meshColumns = 8,
+)
+
 class GemminiLearningConfigSpadNoCNewDMA extends Config (
   // Improve sim speed by removing TileLink monitors
   new freechips.rocketchip.subsystem.WithoutTLMonitors ++

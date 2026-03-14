@@ -2,6 +2,13 @@
 
 CHIPYARD_STAGING_DIR := $(chipyard_dir)/sims/firesim-staging
 
+LEGACY_SFC_ENABLE ?= 0
+ifeq ($(LEGACY_SFC_ENABLE),1)
+CHIPYARD_EXTRA_CHISEL_OPTIONS := --emit-legacy-sfc
+else
+CHIPYARD_EXTRA_CHISEL_OPTIONS :=
+endif
+
 # target scala directories to copy into midas. used by TARGET_COPY_TO_MIDAS_SCALA_DIRS
 TARGET_COPY_TO_MIDAS_SCALA_DIRS := \
 	$(addprefix $(chipyard_dir)/generators/firechip/,bridgeinterfaces goldengateimplementations)
@@ -21,9 +28,13 @@ $(FIRRTL_FILE) $(ANNO_FILE) &: firesim_target_symlink_hook
 			CONFIG=$(TARGET_CONFIG) \
 			CONFIG_PACKAGE=$(TARGET_CONFIG_PACKAGE) \
 			GENERATOR_PACKAGE=chipyard \
-			EXTRA_CHISEL_OPTIONS=--emit-legacy-sfc \
+			EXTRA_CHISEL_OPTIONS="$(CHIPYARD_EXTRA_CHISEL_OPTIONS)" \
 			TB=unused \
 			TOP=unused
 	# $(long_name) must be same as Chipyard
-	ln -sf $(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir $(FIRRTL_FILE)
+	if [ -f "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir" ]; then \
+		ln -sf "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir" "$(FIRRTL_FILE)"; \
+	else \
+		ln -sf "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).fir" "$(FIRRTL_FILE)"; \
+	fi
 	ln -sf $(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).anno.json $(ANNO_FILE)

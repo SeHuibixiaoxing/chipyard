@@ -2,7 +2,9 @@
 
 CHIPYARD_STAGING_DIR := $(chipyard_dir)/sims/firesim-staging
 
-EXTRA_CHISEL_OPTIONS ?= --emit-legacy-sfc
+EXTRA_CHISEL_OPTIONS ?=
+
+CHIPYARD_EXTRA_CHISEL_OPTIONS := $(EXTRA_CHISEL_OPTIONS)
 
 # target scala directories to copy into midas. used by TARGET_COPY_TO_MIDAS_SCALA_DIRS
 TARGET_COPY_TO_MIDAS_SCALA_DIRS := \
@@ -23,11 +25,16 @@ $(FIRRTL_FILE) $(ANNO_FILE) &: firesim_target_symlink_hook
 			CONFIG=$(TARGET_CONFIG) \
 			CONFIG_PACKAGE=$(TARGET_CONFIG_PACKAGE) \
 			GENERATOR_PACKAGE=chipyard \
-			EXTRA_CHISEL_OPTIONS="$(EXTRA_CHISEL_OPTIONS)" \
+			EXTRA_CHISEL_OPTIONS="$(CHIPYARD_EXTRA_CHISEL_OPTIONS)" \
 			TB=unused \
 			TOP=unused
 	# $(long_name) must be same as Chipyard
-	ln -sf $(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir $(FIRRTL_FILE)
+	# Prefer legacy .sfc.fir when present; otherwise fall back to .fir.
+	if [ -f "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir" ]; then \
+		ln -sf "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir" "$(FIRRTL_FILE)"; \
+	else \
+		ln -sf "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).fir" "$(FIRRTL_FILE)"; \
+	fi
 	ln -sf $(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).anno.json $(ANNO_FILE)
 	# .d needed to run metasim CI tests
 	ln -sf $(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).d $(GENERATED_DIR)/$(long_name).d

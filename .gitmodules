@@ -130,9 +130,6 @@
 [submodule "tools/fixedpoint"]
 	path = tools/fixedpoint
 	url = https://github.com/ucb-bar/fixedpoint.git
-[submodule "generators/rerocc"]
-	path = generators/rerocc
-	url = https://github.com/ucb-bar/rerocc.git
 [submodule "generators/compress-acc"]
 	path = generators/compress-acc
 	url = https://github.com/ucb-bar/compress-acc.git
@@ -145,9 +142,6 @@
 [submodule "generators/ara"]
 	path = generators/ara
 	url = https://github.com/ucb-bar/ara-wrapper.git
-[submodule "tools/firrtl2"]
-	path = tools/firrtl2
-	url = https://github.com/ucb-bar/firrtl2.git
 [submodule "generators/vexiiriscv"]
 	path = generators/vexiiriscv
 	url = https://github.com/ucb-bar/vexiiriscv-tile.git
