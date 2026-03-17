@@ -1,0 +1,1 @@
+PYTHONPATH="." python ./scripts/analyse-model-attribute.py "$@"

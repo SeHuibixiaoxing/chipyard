@@ -1,0 +1,1 @@
+PYTHONPATH="." python ./HybridMapper/test/test_SASearch.py"$@"

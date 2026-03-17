@@ -1,0 +1,496 @@
+candidates:
+- mapping:
+    dramBypass:
+    - 0
+    - 0
+    - 0
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 14
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 1
+    - 1
+    - 1
+    tile:
+    - 1
+    - 2048
+    - 1
+    - 14
+    - 1
+  performance:
+    accelUtil: 1
+    dramAccess: 1204224
+    spmAccess: 0
+    spmUtil: 0
+  target:
+    accel: 1
+    spm: 0
+- mapping:
+    dramBypass:
+    - 0
+    - 0
+    - 0
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 14
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 1
+    - 1
+    - 1
+    tile:
+    - 1
+    - 2048
+    - 1
+    - 14
+    - 1
+  performance:
+    accelUtil: 1
+    dramAccess: 1204224
+    spmAccess: 0
+    spmUtil: 0
+  target:
+    accel: 1
+    spm: 256
+- mapping:
+    dramBypass:
+    - 1
+    - 1
+    - 1
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 14
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 0
+    - 0
+    - 0
+    tile:
+    - 1
+    - 2048
+    - 1
+    - 14
+    - 1
+  performance:
+    accelUtil: 1
+    dramAccess: 0
+    spmAccess: 1204224
+    spmUtil: 1204224
+  target:
+    accel: 1
+    spm: 1048576
+- mapping:
+    dramBypass:
+    - 0
+    - 0
+    - 0
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 7
+      - 1
+      - 1
+    - - 1
+      - 2
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 1
+    - 1
+    - 1
+    tile:
+    - 1
+    - 1024
+    - 2
+    - 14
+    - 1
+  performance:
+    accelUtil: 2
+    dramAccess: 1204224
+    spmAccess: 0
+    spmUtil: 0
+  target:
+    accel: 2
+    spm: 0
+- mapping:
+    dramBypass:
+    - 0
+    - 0
+    - 0
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 7
+      - 1
+      - 1
+    - - 1
+      - 2
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 1
+    - 1
+    - 1
+    tile:
+    - 1
+    - 1024
+    - 2
+    - 14
+    - 1
+  performance:
+    accelUtil: 2
+    dramAccess: 1204224
+    spmAccess: 0
+    spmUtil: 0
+  target:
+    accel: 2
+    spm: 256
+- mapping:
+    dramBypass:
+    - 1
+    - 1
+    - 1
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 7
+      - 1
+      - 1
+    - - 1
+      - 2
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 0
+    - 0
+    - 0
+    tile:
+    - 1
+    - 1024
+    - 2
+    - 14
+    - 1
+  performance:
+    accelUtil: 2
+    dramAccess: 0
+    spmAccess: 1204224
+    spmUtil: 1204224
+  target:
+    accel: 2
+    spm: 1048576
+- mapping:
+    dramBypass:
+    - 0
+    - 0
+    - 0
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 7
+      - 1
+      - 1
+    - - 1
+      - 4
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 1
+    - 1
+    - 1
+    tile:
+    - 1
+    - 512
+    - 2
+    - 14
+    - 1
+  performance:
+    accelUtil: 4
+    dramAccess: 1204224
+    spmAccess: 0
+    spmUtil: 0
+  target:
+    accel: 4
+    spm: 0
+- mapping:
+    dramBypass:
+    - 0
+    - 0
+    - 0
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 7
+      - 1
+      - 1
+    - - 1
+      - 4
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 1
+    - 1
+    - 1
+    tile:
+    - 1
+    - 512
+    - 2
+    - 14
+    - 1
+  performance:
+    accelUtil: 4
+    dramAccess: 1204224
+    spmAccess: 0
+    spmUtil: 0
+  target:
+    accel: 4
+    spm: 256
+- mapping:
+    dramBypass:
+    - 1
+    - 1
+    - 1
+    factors:
+    - - 1
+      - 1
+      - 1
+      - 1
+      - 1
+    - - 1
+      - 1
+      - 7
+      - 1
+      - 1
+    - - 1
+      - 4
+      - 1
+      - 1
+      - 1
+    permutation:
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    - - 2
+      - 3
+      - 0
+      - 4
+      - 1
+    spmBypass:
+    - 0
+    - 0
+    - 0
+    tile:
+    - 1
+    - 512
+    - 2
+    - 14
+    - 1
+  performance:
+    accelUtil: 4
+    dramAccess: 0
+    spmAccess: 1204224
+    spmUtil: 1204224
+  target:
+    accel: 4
+    spm: 1048576

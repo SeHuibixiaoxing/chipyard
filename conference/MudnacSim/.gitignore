@@ -1,0 +1,16 @@
+/build/
+/.idea/
+/test/*output*/
+/local/
+/expr/output/*/default/
+.vscode
+/expr/output
+cpptests
+core-*
+logs/*
+*.log
+*.csv
+*.png
+*.jpg
+__pycache__
+*.yaml
