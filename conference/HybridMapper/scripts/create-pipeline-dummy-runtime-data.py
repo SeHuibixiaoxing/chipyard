@@ -10,17 +10,50 @@ Outputs under:
 
 import argparse
 import json
+import os
 import random
 import struct
+import sys
 from pathlib import Path
 
-from ruamel.yaml import YAML
+def _maybe_reexec_with_repo_python():
+  chipyard_root = Path(__file__).resolve().parents[3]
+  preferred = chipyard_root / ".conda-env" / "bin" / "python"
+  if os.environ.get("HYBRIDMAPPER_REEXEC") == "1":
+    return
+  if not preferred.is_file():
+    return
+  if Path(sys.executable).resolve() == preferred.resolve():
+    return
+  env = dict(os.environ)
+  env["HYBRIDMAPPER_REEXEC"] = "1"
+  os.execve(str(preferred), [str(preferred), str(Path(__file__).resolve()), *sys.argv[1:]], env)
+
+_maybe_reexec_with_repo_python()
+
+def _add_local_site_packages():
+  chipyard_root = Path(__file__).resolve().parents[3]
+  version_tag = f"python{sys.version_info.major}.{sys.version_info.minor}"
+  for env_name in (".conda-env", ".conda-lock-env"):
+    site_dir = chipyard_root / env_name / "lib" / version_tag / "site-packages"
+    site_path = str(site_dir)
+    if site_dir.is_dir() and site_path not in sys.path:
+      sys.path.append(site_path)
+
+_add_local_site_packages()
+
+try:
+  from ruamel.yaml import YAML as RuamelYAML
+except ModuleNotFoundError:
+  RuamelYAML = None
+  import yaml as pyyaml
 
 
 def load_yaml(path: Path):
-  yaml = YAML(typ="safe")
   with path.open("r", encoding="utf-8") as f:
-    return yaml.load(f)
+    if RuamelYAML is not None:
+      return RuamelYAML(typ="safe").load(f)
+    return pyyaml.safe_load(f)
 
 
 def to_int_list(v):

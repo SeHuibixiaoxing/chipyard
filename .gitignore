@@ -14,6 +14,8 @@ target
 *~
 .idea
 .DS_Store
+__pycache__/
+*.pyc
 env.sh
 tags
 *~
@@ -32,7 +34,14 @@ project/project/
 .classpath_cache/
 .vscode/
 tests/build/
+tests/*.riscv
 tmp/
-vivado.jou*
-vivado.log*
+node_modules/
+/package.json
+/package-lock.json
+software/firemarshal/logs/
+conference/HybridMapper/output/
+conference/HybridMapper/HybridMapper/test/test_Model_output/
+vivado*.jou
+vivado*.log
 AGENTS.md

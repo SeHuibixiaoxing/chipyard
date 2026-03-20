@@ -1,6 +1,8 @@
 .idea/
 __pycache__/
 output/
+HybridMapper/test/test_Model_output/
+HybridMapper/test/test_HybridMapper_output/
 log.txt
 learning.py
 *.log

@@ -4,7 +4,9 @@ CHIPYARD_STAGING_DIR := $(chipyard_dir)/sims/firesim-staging
 
 EXTRA_CHISEL_OPTIONS ?=
 
-CHIPYARD_EXTRA_CHISEL_OPTIONS := $(EXTRA_CHISEL_OPTIONS)
+# Golden Gate still consumes legacy FIRRTL2 syntax. Emit a companion .sfc.fir so
+# FireSim targets never fall back to the newer FIRRTL dialect by accident.
+CHIPYARD_EXTRA_CHISEL_OPTIONS := --emit-legacy-sfc $(EXTRA_CHISEL_OPTIONS)
 
 # target scala directories to copy into midas. used by TARGET_COPY_TO_MIDAS_SCALA_DIRS
 TARGET_COPY_TO_MIDAS_SCALA_DIRS := \
@@ -17,17 +19,31 @@ $(FIRRTL_FILE) $(ANNO_FILE) &: SHELL := /usr/bin/env bash # needed for running s
 $(FIRRTL_FILE) $(ANNO_FILE) &: firesim_target_symlink_hook
 	@mkdir -p $(@D)
 	source $(chipyard_dir)/env.sh && \
-		make -C $(CHIPYARD_STAGING_DIR) \
-			SBT_PROJECT=$(TARGET_SBT_PROJECT) \
-			MODEL=$(DESIGN) \
-			MODEL_PACKAGE=$(DESIGN_PACKAGE) \
-			VLOG_MODEL=$(DESIGN) \
-			CONFIG=$(TARGET_CONFIG) \
-			CONFIG_PACKAGE=$(TARGET_CONFIG_PACKAGE) \
-			GENERATOR_PACKAGE=chipyard \
-			EXTRA_CHISEL_OPTIONS="$(CHIPYARD_EXTRA_CHISEL_OPTIONS)" \
-			TB=unused \
-			TOP=unused
+		if [ ! -f "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir" ]; then \
+			make -B -C $(CHIPYARD_STAGING_DIR) \
+				SBT_PROJECT=$(TARGET_SBT_PROJECT) \
+				MODEL=$(DESIGN) \
+				MODEL_PACKAGE=$(DESIGN_PACKAGE) \
+				VLOG_MODEL=$(DESIGN) \
+				CONFIG=$(TARGET_CONFIG) \
+				CONFIG_PACKAGE=$(TARGET_CONFIG_PACKAGE) \
+				GENERATOR_PACKAGE=chipyard \
+				EXTRA_CHISEL_OPTIONS="$(CHIPYARD_EXTRA_CHISEL_OPTIONS)" \
+				TB=unused \
+				TOP=unused; \
+		else \
+			make -C $(CHIPYARD_STAGING_DIR) \
+				SBT_PROJECT=$(TARGET_SBT_PROJECT) \
+				MODEL=$(DESIGN) \
+				MODEL_PACKAGE=$(DESIGN_PACKAGE) \
+				VLOG_MODEL=$(DESIGN) \
+				CONFIG=$(TARGET_CONFIG) \
+				CONFIG_PACKAGE=$(TARGET_CONFIG_PACKAGE) \
+				GENERATOR_PACKAGE=chipyard \
+				EXTRA_CHISEL_OPTIONS="$(CHIPYARD_EXTRA_CHISEL_OPTIONS)" \
+				TB=unused \
+				TOP=unused; \
+		fi
 	# $(long_name) must be same as Chipyard
 	# Prefer legacy .sfc.fir when present; otherwise fall back to .fir.
 	if [ -f "$(CHIPYARD_STAGING_DIR)/generated-src/$(long_name)/$(long_name).sfc.fir" ]; then \
