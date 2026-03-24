@@ -202,7 +202,7 @@ trap cleanup_watchdog EXIT
 
 cd $(printf '%q' "${firesim_dir}")
 set +u
-source sourceme-manager.sh
+source sourceme-manager.sh --skip-ssh-setup
 set -u
 cd deploy
 

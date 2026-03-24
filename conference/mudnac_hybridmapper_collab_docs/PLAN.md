@@ -1,108 +1,171 @@
-# Pipeline Runtime Integration Plan
+# Pipeline Runtime Tactical Plan
 
-日期：2026-03-17
+日期：2026-03-24
 
-## 终极目标
+先读：
 
-在不修改模型定义文件的前提下，复用 HybridMapper 现有能力，为 Gemmini `pipeline-runtime` 生成可直接执行的新接口文件，并逐步扩展到更多模型、更多硬件目标和后续的 multi-pipeline 能力。
+- `HANDOFF.md`
+- `STATUS.md`
+- `LESSONS_LEARNED.md`
 
-## 当前阶段
+## 目标
 
-### Phase 1
+在不修改硬件、不恢复 `host_addr` 特判、不破坏 shared-spad `all-bank / 1KB interleaved / multi-manager` 设计目标的前提下，完成 `bertmini` 在 Linux on FireSim F2 上的 end-to-end correctness closure。
 
-目标：
+最终验收固定为：
 
-- 先在 step1 target 上完成单模型、单 pipeline、单层 stage 的闭环
-- 当前模型固定优先 `bertmini`
+- 模型：`bertmini`
+- methods：`ours2 / gemini2 / tangram2`
+- 平台：Linux on FireSim F2
+- 判据：`uartlog` 中出现 `BERTMINI_PIPELINE_RUNTIME_PASS`
 
-当前 step1 target：
+## 当前起点
 
-- `GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2G2x1x2D2x1x2CoupledDMA`
-- key: `rerocc_globalnoc_coupleddma_c2_g2_d2_spad1024kb_dram19_noc64_mac1024`
+- baremetal correctness gate 已闭环。
+  - baremetal 当前不再是 active blocker。
+  - 后续它只作为 regression gate。
 
-Phase 1 剩余工作：
+- `spot` 试跑已经完成。
+  - 当前结论是 AWS 容量不足。
+  - 在没有新容量信号之前，不继续在 `spot` 上耗时。
 
-1. 把新增执行阶段等待插桩打进 Linux binary 和 FireMarshal image
-2. 重新做 FireSim/FPGA replay，确认实际阻塞 phase
-3. 在 bertmini 上拿到真实 FPGA correctness 结论
+- 当前 active 主线重新回到 Linux `pipeline-runtime`。
+- 当前不应假定还有 active run farm。
 
-Phase 1 完成标准：
+## 固定约束
 
-- `bertmini`
-- methods: `ours2 / gemini2 / tangram2`
-- exporter 产物来自当前新接口
-- `pipeline-runtime` 读取新接口完成 entire-model 执行
-- FireSim/FPGA 输出与 CPU golden 在误差范围内对齐
+- 不改 RTL / 不改硬件。
+- 不恢复 `host_addr` 特判。
+- 不把多 manager 路径降级成 single manager。
+- 不破坏 shared-spad 的 `all-bank / 1KB interleaved` 分配策略。
+- 不引入 bertmini 路径上的 CPU fallback。
+- 尽量不引入 pack/repack 之类改变张量布局的 workaround。
+- FireSim manager 固定流程仍然是：
+  `marshal build -> marshal install -> launchrunfarm -> infrasetup -> runworkload -> terminaterunfarm`
+- `launchrunfarm` / `infrasetup` / `runworkload` / `terminaterunfarm` 必须通过：
+  [firesim-tmux-run.sh](/home/ubuntu/chipyard/scripts/firesim-tmux-run.sh)
+- manager 环境必须从：
+  [sims/firesim](/home/ubuntu/chipyard/sims/firesim)
+  下执行 `source sourceme-manager.sh --skip-ssh-setup`
+- Linux 启动阶段只要没有明确错误，且 heartbeat 继续增长，就按“慢启动”处理，不按“卡死”处理。
 
-### Phase 2
+## 当前已经固定的技术结论
 
-目标：
+### 1. baremetal 已证明 shared-spad 设计本身不是当前问题
 
-- 把当前闭环扩展到更多模型
+- standard WS resadd 可用。
+- dual-manager split resadd 可用。
+- interleaved shared-spad alias translation 可用。
+- `mvin2` 访问 interleaved shared-spad 也不是普遍坏掉。
 
-当前重点：
+### 2. 不能重新打开的旧假设
 
-- 除 `bertmini` 外，补更多支持模型的 fresh 导出与验证
-- `resnet50` 当前先不在 step1 target 上强推，因为已确认 `SPM_EXCEED`
+- 不要重新怀疑 shared-spad 页表设计本身。
+- 不要重新怀疑 pointwise `J=128` 硬件上限。
+- 不要重新怀疑必须禁止跨 tile shared-spad 访问。
+- 不要重新怀疑必须把多 manager 路径收缩成单 manager。
 
-### Phase 3
+### 3. 当前 runtime 更强的可疑点仍是 page placement contract
 
-目标：
+- fixed-weight 页分配已经按多 manager 视图处理。
+- 但 entry/export tensor 的 local slot page 分配、exec-view rebase、manager binding 仍可能偏向单一 `stage_acc`。
+- 这会让：
+  - 负载划分是多 manager 的
+  - 地址空间管理却不是多 manager 一致的
+- 因而当前最值得优先排查的是：
+  runtime 自己的 stage-local page placement contract 是否统一。
 
-- 在更大 dummy hardware target 上验证 entire model 支持
+### 4. stride 语义已经进入主线 contract，但 pad 仍需继续盯住
 
-要求：
+- `stride` 不应再猜。
+- HybridMapper 已开始导出 `tensorStride`，runtime 也已消费这份元数据。
+- 但 `pad` 仍可能依赖 runtime 从 size/shape 关系中推导。
+- 因而当前要继续检查：
+  - `input / weight / output size`
+  - `in_stride / weight_stride / out_stride`
+  - `pad`
+  - layer definition
+  这几者之间是否完全一致。
 
-- dummy target 不生成真实计算/存储单元
-- 重点检查导出、装载、runtime 执行路径是否完整
+## 执行计划
 
-### Phase 4
+### Phase 1. 固化 baremetal regression gate
 
-目标：
+- 保留当前 baremetal workload 作为 shared-spad / resadd / pointwise 的回归门：
+  [rerocc-lc-baremetal-coupleddma-explicit-interleaved-small.json](/home/ubuntu/chipyard/generators/gemmini/software/gemmini-rocc-tests/rerocc-baremetal-tests-coupleddma/workload/rerocc-lc-baremetal-coupleddma-explicit-interleaved-small.json)
+- 后续只要改动下列任一语义，就必须回归 baremetal：
+  - shared-spad xlate
+  - explicit `mvin/mvin2/mvout`
+  - resadd path
+  - pointwise fallback path
 
-- 支持多模型并发，对齐 Mudnac 的 multi-pipeline 方向
+### Phase 2. 回到 Linux runtime 主线复现当前 blocker
 
-后续再进入：
+- 在当前 head 上重新做 Linux FireSim replay。
+- 只要 Linux boot 没有明确错误且 heartbeat 在前进，就继续等。
+- 判定 live blocker 时：
+  - 优先看 guest `uartlog`
+  - 不信 manager exit code
+  - 若真卡死，先回收 runfarm 再改代码
 
-- schedule-point 划分
-- 面向 schedule-point 的 pipeline mapping
-- dynamic QoS
+### Phase 3. 先审 runtime 的 manager/page contract，不先怀疑硬件
 
-## 当前优先级
+- 审查 runtime 中以下两类页分配是否统一：
+  - fixed-weight tensor
+  - stage-local entry/export tensor
+- 审查以下语义是否一致：
+  - manager 绑定
+  - local exec view
+  - page placement
+  - tile/subview rebase
+- 目标是把同一 stage 的多 manager 执行视图收敛到统一 contract：
+  - 连续 shared-spad alias VA
+  - 每 manager 独立页表翻译
+  - 保持 all-bank / 1KB interleaved 物理页策略不变
 
-1. `bertmini` FPGA correctness 闭环
-2. 更多模型的正确性扩展
-3. 更大 dummy target
-4. multi-pipeline
+### Phase 4. 补全 HybridMapper -> runtime 元数据 contract
 
-## 固定流程
+- 保持 `tensorStride` 导出和消费一致。
+- 不再回到 guessed stride。
+- 对有 padding 的层，明确：
+  - 继续推导，还是导出显式 metadata
+- 用模型尺寸关系验证：
+  - input size
+  - weight size
+  - output size
+  - stride
+  - pad
 
-- 不手工改 `sims/firesim/deploy/workloads/*.json`
-- 所有 FPGA workload 变体先写 FireMarshal 源配置
-- 固定顺序：
-  1. `marshal build`
-  2. `marshal install`
-  3. `launchrunfarm`
-  4. `infrasetup`
-  5. `runworkload`
-- run 结束后执行 `terminaterunfarm`
+### Phase 5. 若 runtime 仍需手写 explicit path，必须遵守 baremetal 已验证的语义
 
-## 当前约束
+- `mvin2` 到 accumulator 不是“独立 buffer load”。
+- 若想得到“纯覆盖写入”的效果，必须先初始化目标 acc 行。
+- `gemmini_fence()` 不是 ReRoCC manager 可见的 completion barrier。
+- 需要 manager-visible completion 时，使用 `rr_fence(cfg_id)`。
+- 显式依赖链若存在，必须类似：
+  `A mvin -> rr_fence -> B mvin2 -> rr_fence -> mvout`
+- 能回到 standard WS path 的地方，优先回到 standard WS path。
 
-- 不改模型定义文件
-- `stage == 1 layer`
-- `pipeline-runtime` 只读新接口
-- 允许多个 hardware target，但要输出不同文件名
-- layer mapping 必须支持单层映射到多个 Gemmini 核
-- 该多核映射结果由 HybridMapper 离线生成，runtime 只消费
+### Phase 6. 完整 closure
 
-## 当前暂缓项
+- Linux `bertmini` on FireSim F2 输出正确。
+- `BERTMINI_PIPELINE_RUNTIME_PASS` 出现在 `uartlog`。
+- baremetal regression 继续保持全绿。
 
-- 多层 stage 语义
-- `resnet50` 在 step1 target 上的继续搜索
-- SA `max_iterations=100000` 的扩大搜索
+## 成功标准
 
-说明：
+- Linux runtime 路径闭环。
+- baremetal gate 不回归。
+- 无需 RTL 改动。
+- 无需 `host_addr` 特判。
 
-- 当前 SA 先维持能支撑开发推进的配置
-- 待当前闭环稳定后，再统一提高 SA 搜索强度
+## 参考文档
+
+- handoff 摘要：
+  [HANDOFF.md](/home/ubuntu/chipyard/conference/mudnac_hybridmapper_collab_docs/HANDOFF.md)
+- 当前状态：
+  [STATUS.md](/home/ubuntu/chipyard/conference/mudnac_hybridmapper_collab_docs/STATUS.md)
+- 经验教训：
+  [LESSONS_LEARNED.md](/home/ubuntu/chipyard/conference/mudnac_hybridmapper_collab_docs/LESSONS_LEARNED.md)
+- pointwise 详细归档：
+  [SEG0_LAYER0_POINTWISE_ATTEMPTS.md](/home/ubuntu/chipyard/conference/mudnac_hybridmapper_collab_docs/SEG0_LAYER0_POINTWISE_ATTEMPTS.md)

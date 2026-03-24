@@ -118,9 +118,12 @@ class Layer(ABC):
     
     def getWeightTensorId(self):
         return [id for id in self.data if ((id not in self.getInputTensorId()) and (id not in self.getOutputTensorId()))]
-    
+
     def getTotalSize(self, id_list: list[int]):
         return sum([self.getDataSize(id) for id in id_list])
+
+    def getTensorStrideList(self):
+        return [1 for _ in self.data]
 
 class LayerConv(Layer):
     def __init__(self, param: list[int], data: list[int], dramKeep: list[int] = None,
@@ -170,6 +173,10 @@ class LayerConv(Layer):
     
     def getOutputTensorId(self):
         return [self.data[3]]
+
+    def getTensorStrideList(self):
+        N, IC, OC, OH, OW, KH, KW, G, sH, sW = self.param
+        return [1, OC, G * IC, G * OC]
     
 class LayerResadd(Layer):
     def __init__(self, param: list[int], data: list[int], dramKeep: list[int] = None,
@@ -210,6 +217,11 @@ class LayerResadd(Layer):
     
     def getOutputTensorId(self):
         return [self.data[2]]
+
+    def getTensorStrideList(self):
+        N, C, H, W, G = self.param
+        stride = C * G
+        return [stride, stride, stride]
     
 class LayerPool(Layer):
     def __init__(self, param: list[int], data: list[int]):
@@ -234,6 +246,10 @@ class LayerPool(Layer):
     
     def getOutputTensorId(self):
         return [self.data[1]]
+
+    def getTensorStrideList(self):
+        N, IC, IH, IW, KH, KW, sH, sW = self.param
+        return [IC, IC]
     
 class Model:
     """
@@ -384,6 +400,7 @@ class Model:
             layerNode["type"] = layer.type
             layerNode["param"] = layer.param
             layerNode["tensorIds"] = layer.data
+            layerNode["tensorStride"] = layer.getTensorStrideList()
             layerNode["address"] = [self.dataAddrMap[data] for data in layer.data]
             layerNode["address2"] = [self.dataAddrMap2[data] for data in layer.data]
             layerNode["tensorSize"] = layer.size
