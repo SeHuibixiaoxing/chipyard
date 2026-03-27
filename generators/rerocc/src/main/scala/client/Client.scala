@@ -50,7 +50,7 @@ class InstructionSender(b: ReRoCCBundleParams)(implicit p: Parameters) extends M
 
   when (state === s_inst) {
     next_state := Mux(cmd.bits.cmd.inst.xs1, s_rs1,
-      Mux(cmd.bits.cmd.inst.xs1, s_rs2, s_inst))
+      Mux(cmd.bits.cmd.inst.xs2, s_rs2, s_inst))
   } .elsewhen (state === s_rs1) {
     next_state := Mux(cmd.bits.cmd.inst.xs2, s_rs2, s_inst)
   } .elsewhen (state === s_rs2) {

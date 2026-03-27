@@ -25,6 +25,8 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
   meshRows: Int = 8,
   meshColumns: Int = 8,
   useGlobalNoC: Boolean = false,
+  useDeterministicGlobalNoCRouting: Boolean = false,
+  useDummyGemmini: Boolean = false,
   filterDmaVisibleManagers: Boolean = false,
   connectSbusSlaveToStl: Boolean = false
 ) extends Config({
@@ -123,12 +125,19 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
     routingRelation = BlockingVirtualSubnetworksRouting(TerminalRouterRouting(Mesh2DEscapeRouting()), 5, 1)
   )
 
+  val globalNoCRoutingRelation =
+    if (useDeterministicGlobalNoCRouting) {
+      TerminalRouterRouting(Mesh2DDimensionOrderedRouting())
+    } else {
+      BlockingVirtualSubnetworksRouting(
+        TerminalRouterRouting(Mesh2DEscapeRouting()), 7, 1
+      )
+    }
+
   val globalNoCParams = constellation.noc.NoCParams(
     topology = TerminalRouter(Mesh2D(nocCols, nocRows)),
     channelParamGen = (a, b) => UserChannelParams(Seq.fill(7) { UserVirtualChannelParams(8) }),
-    routingRelation = BlockingVirtualSubnetworksRouting(
-      TerminalRouterRouting(Mesh2DEscapeRouting()), 7, 1
-    ),
+    routingRelation = globalNoCRoutingRelation,
     skipValidationChecks = true
   )
 
@@ -159,22 +168,45 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
       )
     }
 
-  val managerGemminiConfig = gemmini.GemminiConfigs.defaultConfig.copy(
-    opcodes = OpcodeSet.custom3,
-    meshRows = meshRows,
-    meshColumns = meshColumns,
-    dma_buswidth = sbusWidthBits,
-    shared_scratchpad_config = gemmini.SharedScratchpadConfig(
-      enable = true,
-      global_base_addr = BigInt("40000000", 16),
-      local_size_bytes = 1024 * 1024,
-      local_banks = 1,
-      local_bank_interleaved_bytes = gemminiBeatBytes.max(64),
-      local_bank_beat_bytes = gemminiBeatBytes,
-      use_page_table_xlate = true,
-      share_xlate_with_coupled_dma = true
-    )
+  val sharedScratchpadConfig = gemmini.SharedScratchpadConfig(
+    enable = true,
+    global_base_addr = BigInt("40000000", 16),
+    local_size_bytes = 1024 * 1024,
+    local_banks = 1,
+    local_bank_interleaved_bytes = gemminiBeatBytes.max(64),
+    local_bank_beat_bytes = gemminiBeatBytes,
+    use_page_table_xlate = true,
+    share_xlate_with_coupled_dma = true
   )
+
+  val gemminiManagerConfig =
+    if (useDummyGemmini) {
+      new chipyard.config.WithReRoCCGemminiManagers(
+        numGemmini = numGemmini,
+        gemminiIdBase = 0
+      )(
+        gemmini.GemminiConfigs.dummyConfig.copy(
+          opcodes = OpcodeSet.custom3,
+          meshRows = meshRows,
+          meshColumns = meshColumns,
+          dma_buswidth = sbusWidthBits,
+          shared_scratchpad_config = sharedScratchpadConfig
+        )
+      )
+    } else {
+      new chipyard.config.WithReRoCCGemminiManagers(
+        numGemmini = numGemmini,
+        gemminiIdBase = 0
+      )(
+        gemmini.GemminiConfigs.defaultConfig.copy(
+          opcodes = OpcodeSet.custom3,
+          meshRows = meshRows,
+          meshColumns = meshColumns,
+          dma_buswidth = sbusWidthBits,
+          shared_scratchpad_config = sharedScratchpadConfig
+        )
+      )
+    }
 
   (new freechips.rocketchip.subsystem.WithoutTLMonitors
     ++ sbusAndGlobalNoCConfig
@@ -189,12 +221,9 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
     ++ new chipyard.config.WithReRoCCCoupledDMAManagers(
       numDMA = numDMA,
       gemminiIdBase = 0,
-      sharedScratchpadConfig = managerGemminiConfig.shared_scratchpad_config
+      sharedScratchpadConfig = sharedScratchpadConfig
     )
-    ++ new chipyard.config.WithReRoCCGemminiManagers(
-      numGemmini = numGemmini,
-      gemminiIdBase = 0
-    )(managerGemminiConfig)
+    ++ gemminiManagerConfig
     ++ new chipyard.config.WithInheritBusFrequencyAssignments
     ++ new chipyard.config.WithUniformBusFrequencies(freqMHz)
     ++ new chipyard.config.WithTileFrequency(freqMHz)
@@ -266,5 +295,28 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2G2x1x2D2x1x2CoupledDMAConnect
     meshColumns = 8,
     useGlobalNoC = true,
     filterDmaVisibleManagers = false,
+    connectSbusSlaveToStl = true
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC6C3x2G16x4x4D16x4x4CoupledDMADummy32x32M8
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 6,
+    cpuX = 3,
+    cpuY = 2,
+    numGemmini = 16,
+    gemminiX = 4,
+    gemminiY = 4,
+    numDMA = 16,
+    dmaX = 4,
+    dmaY = 4,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 8,
+    freqMHz = 1000.0,
+    meshRows = 32,
+    meshColumns = 32,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
     connectSbusSlaveToStl = true
   )

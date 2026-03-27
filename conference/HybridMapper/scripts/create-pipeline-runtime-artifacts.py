@@ -158,11 +158,19 @@ def dump_yaml(path: Path, data: object):
 
             InlineListDumper.add_representer(list, represent_list)
             InlineListDumper.add_representer(dict, represent_dict)
-            pyyaml.dump(data, f, Dumper=InlineListDumper, sort_keys=False, allow_unicode=False)
+            pyyaml.dump(
+                data,
+                f,
+                Dumper=InlineListDumper,
+                sort_keys=False,
+                allow_unicode=False,
+                width=1 << 20,
+            )
         elif RuamelYAML is not None:
             yaml = RuamelYAML()
             yaml.default_flow_style = False
             yaml.indent(mapping=2, sequence=4, offset=2)
+            yaml.width = 1 << 20
             yaml.dump(data, f)
         else:
             raise RuntimeError("no YAML writer available")
@@ -172,6 +180,10 @@ def to_int_list(values: Any) -> List[int]:
     if not isinstance(values, list):
         return []
     return [int(v) for v in values]
+
+
+def value_or_default(value: Any, default: Any) -> Any:
+    return default if value is None else value
 
 
 def layer_type(layer: Any) -> str:
@@ -222,7 +234,7 @@ def index_layers(layers: Sequence[Any]) -> Dict[int, Any]:
     indexed: Dict[int, Any] = {}
     for idx, layer in enumerate(layers):
         if isinstance(layer, dict):
-            layer_idx = int(layer.get("index", idx) or idx)
+            layer_idx = int(value_or_default(layer.get("index", idx), idx))
         else:
             layer_idx = idx
         indexed[layer_idx] = layer
@@ -490,7 +502,7 @@ def emit_runtime_layer_mapping_from_legacy(
         if not mapping_path.stem.isdigit():
             continue
         doc = load_yaml(mapping_path) or {}
-        layer_id = int(doc.get("layer_id", mapping_path.stem) or mapping_path.stem)
+        layer_id = int(value_or_default(doc.get("layer_id", mapping_path.stem), mapping_path.stem))
         layer = layer_map[layer_id]
         for candidate in doc.get("candidates", []) or []:
             if isinstance(candidate, dict):
@@ -542,8 +554,273 @@ def update_stage_runtime_fields(
         )
 
 
+def index_runtime_layer_mapping_entries(runtime_layer_mapping_doc: Dict[str, Any]) -> Dict[int, List[Dict[str, Any]]]:
+    by_layer: Dict[int, List[Dict[str, Any]]] = {}
+    for entry in runtime_layer_mapping_doc.get("entries", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        layer_id = int(value_or_default(entry.get("layer_id", -1), -1))
+        if layer_id < 0:
+            continue
+        by_layer.setdefault(layer_id, []).append(entry)
+    return by_layer
+
+
+def match_stage_runtime_mapping(stage: Dict[str, Any], stage_acc: int, entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def layout_key(entry: Dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            tuple(to_int_list(entry.get("others_spm_tensor_addr", []))),
+            tuple(to_int_list(entry.get("others_first_tensor_page_num", []))),
+            tuple(to_int_list(entry.get("others_spm_tensor_page_count", []))),
+            tuple(to_int_list(entry.get("others_spm_tensor_util", []))),
+        )
+
+    def collapse_layout_matches(candidates: List[Dict[str, Any]], reason: str) -> Dict[str, Any]:
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            raise RuntimeError(reason)
+        keys = {layout_key(entry) for entry in candidates}
+        if len(keys) == 1:
+            return candidates[0]
+        raise RuntimeError(reason)
+
+    layer_ids = to_int_list(stage.get("layerIdList", []))
+    if len(layer_ids) != 1:
+        raise RuntimeError(f"runtime contract requires one layer per stage, got {layer_ids}")
+    dram_rows = stage.get("dramBypassList", []) or [[]]
+    spm_rows = stage.get("spmBypassList", []) or [[]]
+    stage_dram = to_int_list(dram_rows[0] if dram_rows else [])
+    stage_spm = to_int_list(spm_rows[0] if spm_rows else [])
+    stage_split = str(stage.get("splitKind", "") or "")
+    matches = []
+    for entry in entries:
+        if int(value_or_default(entry.get("layer_id", -1), -1)) != layer_ids[0]:
+            continue
+        if int(entry.get("target_accel", 0) or 0) != stage_acc:
+            continue
+        if to_int_list(entry.get("mapping_dram_bypass", [])) != stage_dram:
+            continue
+        if to_int_list(entry.get("mapping_spm_bypass", [])) != stage_spm:
+            continue
+        entry_split = str(entry.get("split_kind", "") or "")
+        if stage_split and entry_split and stage_split != entry_split:
+            continue
+        matches.append(entry)
+    if matches:
+        return collapse_layout_matches(
+            matches,
+            f"expected exactly one runtime layer mapping for layer={layer_ids[0]} acc={stage_acc}, got {len(matches)}",
+        )
+
+    expected_pages = to_int_list(stage.get("_expected_local_spm_page_count", []))
+    if expected_pages:
+        relaxed_matches = []
+        for entry in entries:
+            if int(value_or_default(entry.get("layer_id", -1), -1)) != layer_ids[0]:
+                continue
+            if to_int_list(entry.get("others_spm_tensor_page_count", [])) != expected_pages:
+                continue
+            relaxed_matches.append(entry)
+        if relaxed_matches:
+            return collapse_layout_matches(
+                relaxed_matches,
+                f"expected a unique runtime layout match for layer={layer_ids[0]} expected_pages={expected_pages}, got {len(relaxed_matches)}",
+            )
+
+    raise RuntimeError(
+        f"expected exactly one runtime layer mapping for layer={layer_ids[0]} acc={stage_acc}, got 0; expected_pages={expected_pages}"
+    )
+
+
+def build_segment_runtime_layout(seg: Dict[str, Any], layer_mapping_by_layer: Dict[int, List[Dict[str, Any]]]) -> None:
+    next_buffer_id = 1
+    next_alias_group_id = 1
+    segment_span = 0
+    stages = seg.get("stages", []) or []
+    shared_groups: Dict[int, Dict[str, int]] = {}
+    buffer_bindings: List[Dict[str, int | str]] = []
+
+    for stage_local_id, stage_group in enumerate(stages):
+        if not isinstance(stage_group, list) or len(stage_group) != 1 or not isinstance(stage_group[0], dict):
+            raise RuntimeError("runtime contract requires each stage group to contain exactly one mapping stage")
+        stage = stage_group[0]
+        layer_ids = to_int_list(stage.get("layerIdList", []))
+        if len(layer_ids) != 1:
+            raise RuntimeError(f"runtime contract requires one layer per stage, got {layer_ids}")
+        stage_acc = int(stage.get("accUtil", stage.get("acc_util", 0)) or 0)
+        tensor_ids = to_int_list(stage.get("tensorIdList", []))
+        stage_spm_util_rows = seg.get("tensor_spm_util_in_stage", []) or []
+        stage_spm_util = (
+            {int(k): int(v) for k, v in (stage_spm_util_rows[stage_local_id] or {}).items()}
+            if stage_local_id < len(stage_spm_util_rows) and isinstance(stage_spm_util_rows[stage_local_id], dict)
+            else {}
+        )
+        weight_spm_util = {int(k): int(v) for k, v in (seg.get("tensor_spm_util_weight", {}) or {}).items()}
+        shared_spm_util = {int(k): int(v) for k, v in (seg.get("tensor_spm_util_shared", {}) or {}).items()}
+        entry_tensor_ids = to_int_list(stage.get("entryTensorIdList", []))
+        entry_tensor_types = [str(v) for v in (stage.get("entryTensorTypeList", []) or [])]
+        export_tensor_ids = to_int_list(stage.get("exportTensorIdList", []))
+        export_tensor_types = [str(v) for v in (stage.get("exportTensorTypeList", []) or [])]
+        shared_tensor_ids = {
+            tid
+            for tid, tensor_type in list(zip(entry_tensor_ids, entry_tensor_types)) + list(zip(export_tensor_ids, export_tensor_types))
+            if tensor_type == "SHARED_SPM"
+        }
+        expected_page_count = []
+        for tensor_id in tensor_ids:
+            pages = int(weight_spm_util.get(int(tensor_id), 0) or 0)
+            if pages <= 0:
+                pages = int(stage_spm_util.get(int(tensor_id), 0) or 0)
+            if pages <= 0 and int(tensor_id) in shared_tensor_ids:
+                pages = int(shared_spm_util.get(int(tensor_id), 0) or 0)
+            expected_page_count.append(max(0, pages))
+        stage["_expected_local_spm_page_count"] = expected_page_count
+        mapping_entry = match_stage_runtime_mapping(stage, stage_acc, layer_mapping_by_layer.get(layer_ids[0], []))
+        local_addr = to_int_list(mapping_entry.get("others_spm_tensor_addr", []))
+        local_first_vpage = to_int_list(mapping_entry.get("others_first_tensor_page_num", []))
+        local_page_count = to_int_list(mapping_entry.get("others_spm_tensor_page_count", []))
+        local_tensor_bytes = to_int_list(mapping_entry.get("others_spm_tensor_util", []))
+        if not (
+            len(tensor_ids)
+            == len(local_addr)
+            == len(local_first_vpage)
+            == len(local_page_count)
+            == len(local_tensor_bytes)
+        ):
+            raise RuntimeError(
+                f"stage layer={layer_ids[0]} local layout length mismatch tensorIds={len(tensor_ids)} "
+                f"addr={len(local_addr)} first={len(local_first_vpage)} pages={len(local_page_count)} bytes={len(local_tensor_bytes)}"
+            )
+        stage_span = 0
+        for first_vpage, page_count in zip(local_first_vpage, local_page_count):
+            stage_span = max(stage_span, int(first_vpage) + int(page_count))
+        stage["execBaseVPage"] = int(segment_span)
+        stage["localSpmTensorAddrList"] = local_addr
+        stage["localSpmFirstVPageList"] = local_first_vpage
+        stage["localSpmPageCountList"] = local_page_count
+        stage["localSpmTensorBytesList"] = local_tensor_bytes
+        stage["localSpmPageSpan"] = int(stage_span)
+        segment_span += stage_span
+
+        entry_buffer_ids: List[int] = []
+        export_buffer_ids: List[int] = []
+        stage["_entry_buffer_ids"] = entry_buffer_ids
+        stage["_export_buffer_ids"] = export_buffer_ids
+        stage["_local_stage_id"] = int(stage_local_id)
+
+        for tensor_type_list_name, tensor_id_list_name, tensor_db_list_name, is_entry in (
+            ("entryTensorTypeList", "entryTensorIdList", "entryTensorDoubleBufferList", 1),
+            ("exportTensorTypeList", "exportTensorIdList", "exportTensorDoubleBufferList", 0),
+        ):
+            tensor_types = list(stage.get(tensor_type_list_name, []) or [])
+            tensor_ids_role = to_int_list(stage.get(tensor_id_list_name, []))
+            tensor_dbuf = to_int_list(stage.get(tensor_db_list_name, []))
+            if len(tensor_types) != len(tensor_ids_role) or len(tensor_dbuf) != len(tensor_ids_role):
+                raise RuntimeError(f"stage layer={layer_ids[0]} tensor binding length mismatch for {tensor_id_list_name}")
+            for tensor_id, tensor_type, double_buffer in zip(tensor_ids_role, tensor_types, tensor_dbuf):
+                tensor_idx = tensor_ids.index(int(tensor_id))
+                slot_count = 2 if int(double_buffer) else 1
+                pages_per_slot = int(local_page_count[tensor_idx])
+                alias_group_id = 0
+                if str(tensor_type) == "SHARED_SPM":
+                    info = shared_groups.setdefault(
+                        int(tensor_id),
+                        {"slot_count": 1, "pages_per_slot": 0, "alias_group_id": next_alias_group_id},
+                    )
+                    if info["alias_group_id"] == next_alias_group_id:
+                        next_alias_group_id += 1
+                    info["slot_count"] = max(info["slot_count"], slot_count)
+                    info["pages_per_slot"] = max(info["pages_per_slot"], pages_per_slot)
+                    alias_group_id = int(info["alias_group_id"])
+                    slot_count = int(info["slot_count"])
+                    pages_per_slot = int(info["pages_per_slot"])
+                if str(tensor_type) == "ALL_RINGBUFFER":
+                    slot_count = 0
+                    pages_per_slot = 0
+                buffer_bindings.append(
+                    {
+                        "buffer_id": next_buffer_id,
+                        "tensor_id": int(tensor_id),
+                        "stage_local_id": int(stage_local_id),
+                        "is_entry": int(is_entry),
+                        "kind": "PIPE",
+                        "slot_count": int(slot_count),
+                        "pages_per_slot": int(pages_per_slot),
+                        "alias_group_id": int(alias_group_id),
+                    }
+                )
+                if is_entry:
+                    entry_buffer_ids.append(next_buffer_id)
+                else:
+                    export_buffer_ids.append(next_buffer_id)
+                next_buffer_id += 1
+
+        fix_tensor_ids = to_int_list(stage.get("fixTensorDramBypassIdList", []))
+        for tensor_id in fix_tensor_ids:
+            tensor_idx = tensor_ids.index(int(tensor_id))
+            pages_per_slot = int(local_page_count[tensor_idx])
+            if pages_per_slot <= 0:
+                continue
+            buffer_bindings.append(
+                {
+                    "buffer_id": next_buffer_id,
+                    "tensor_id": int(tensor_id),
+                    "stage_local_id": int(stage_local_id),
+                    "is_entry": 0,
+                    "kind": "WEIGHT",
+                    "slot_count": 1,
+                    "pages_per_slot": pages_per_slot,
+                    "alias_group_id": 0,
+                }
+            )
+            next_buffer_id += 1
+
+    ring_count = {int(k): int(v) for k, v in (seg.get("ring_buffer_count", {}) or {}).items()}
+    ring_size_per = {int(k): int(v) for k, v in (seg.get("ring_buffer_size_per", {}) or {}).items()}
+    ring_total_pages = {int(k): int(v) for k, v in (seg.get("tensor_spm_util_in_ringbuffer", {}) or {}).items()}
+    for tensor_id, count in sorted(ring_count.items()):
+        if count <= 0:
+            continue
+        pages_per_slot = int(ring_size_per.get(tensor_id, 0) or 0)
+        if pages_per_slot <= 0:
+            total_pages = int(ring_total_pages.get(tensor_id, 0) or 0)
+            pages_per_slot = (total_pages + count - 1) // count if total_pages > 0 else 0
+        buffer_bindings.append(
+            {
+                "buffer_id": next_buffer_id,
+                "tensor_id": int(tensor_id),
+                "stage_local_id": 0xFFFFFFFF,
+                "is_entry": 0,
+                "kind": "RING",
+                "slot_count": int(count),
+                "pages_per_slot": int(pages_per_slot),
+                "alias_group_id": 0,
+            }
+        )
+        next_buffer_id += 1
+
+    seg["segmentSpmPageSpan"] = int(segment_span)
+    seg["bufferBindingIdList"] = [int(item["buffer_id"]) for item in buffer_bindings]
+    seg["bufferBindingTensorIdList"] = [int(item["tensor_id"]) for item in buffer_bindings]
+    seg["bufferBindingStageLocalIdList"] = [int(item["stage_local_id"]) for item in buffer_bindings]
+    seg["bufferBindingIsEntryList"] = [int(item["is_entry"]) for item in buffer_bindings]
+    seg["bufferBindingKindList"] = [str(item["kind"]) for item in buffer_bindings]
+    seg["bufferBindingSlotCountList"] = [int(item["slot_count"]) for item in buffer_bindings]
+    seg["bufferBindingPagesPerSlotList"] = [int(item["pages_per_slot"]) for item in buffer_bindings]
+    seg["bufferBindingAliasGroupIdList"] = [int(item["alias_group_id"]) for item in buffer_bindings]
+
+    for stage_group in stages:
+        stage = stage_group[0]
+        stage["entryBufferIdList"] = list(stage.pop("_entry_buffer_ids", []))
+        stage["exportBufferIdList"] = list(stage.pop("_export_buffer_ids", []))
+        stage.pop("_expected_local_spm_page_count", None)
+        stage.pop("_local_stage_id", None)
+
+
 def transform_pipeline_for_runtime(
     layer_map: Dict[int, Any],
+    runtime_layer_mapping_doc: Dict[str, Any],
     pipeline_doc: Dict[str, Any],
     source_path: Path,
     target: RuntimeHardwareTarget,
@@ -562,10 +839,11 @@ def transform_pipeline_for_runtime(
         "cost": int(pipeline_doc.get("cost", 0) or 0),
         "segments": [],
     }
+    layer_mapping_by_layer = index_runtime_layer_mapping_entries(runtime_layer_mapping_doc)
 
     for seg_idx, seg in enumerate(pipeline_doc.get("segments", []) or []):
         out_seg = dict(seg)
-        out_seg["segment_idx"] = int(seg.get("segment_idx", seg_idx) or seg_idx)
+        out_seg["segment_idx"] = int(value_or_default(seg.get("segment_idx", seg_idx), seg_idx))
         out_stages = []
         for stage_group in seg.get("stages", []) or []:
             if not isinstance(stage_group, list) or len(stage_group) != 1:
@@ -579,6 +857,7 @@ def transform_pipeline_for_runtime(
             global_stage_id += 1
             out_stages.append([stage])
         out_seg["stages"] = out_stages
+        build_segment_runtime_layout(out_seg, layer_mapping_by_layer)
         out_doc["segments"].append(out_seg)
     return out_doc
 
@@ -592,7 +871,10 @@ def emit_runtime_pipeline(
     method: str,
     source_mode: str,
 ):
-    runtime_doc = transform_pipeline_for_runtime(layer_map, pipeline_doc, source_path, target, source_mode, method)
+    runtime_layer_mapping = load_yaml(runtime_dir / runtime_layer_mapping_filename(target)) or {}
+    runtime_doc = transform_pipeline_for_runtime(
+        layer_map, runtime_layer_mapping, pipeline_doc, source_path, target, source_mode, method
+    )
     out_path = runtime_dir / runtime_pipeline_filename(target, method)
     dump_yaml(out_path, runtime_doc)
     return out_path
@@ -704,8 +986,8 @@ def emit_runtime_graph_partition_from_legacy(
         segments = pipeline_doc.get("segments", []) or []
         if not segments:
             continue
-        start_layer = int(segments[0].get("start_layer_idx", 0) or 0)
-        end_layer = int(segments[-1].get("end_layer_idx", start_layer) or start_layer)
+        start_layer = int(value_or_default(segments[0].get("start_layer_idx", 0), 0))
+        end_layer = int(value_or_default(segments[-1].get("end_layer_idx", start_layer), start_layer))
         candidates.append(
             {
                 "synthetic": True,
@@ -721,9 +1003,9 @@ def emit_runtime_graph_partition_from_legacy(
                 "cost": int(pipeline_doc.get("cost", 0) or 0),
                 "segments": [
                     {
-                        "segment_idx": int(seg.get("segment_idx", idx) or idx),
-                        "start_layer_idx": int(seg.get("start_layer_idx", start_layer) or start_layer),
-                        "end_layer_idx": int(seg.get("end_layer_idx", end_layer) or end_layer),
+                        "segment_idx": int(value_or_default(seg.get("segment_idx", idx), idx)),
+                        "start_layer_idx": int(value_or_default(seg.get("start_layer_idx", start_layer), start_layer)),
+                        "end_layer_idx": int(value_or_default(seg.get("end_layer_idx", end_layer), end_layer)),
                         "acc_util": int(seg.get("acc_util", 0) or 0),
                         "cost": int(seg.get("cost", 0) or 0),
                         "stage_count": len(seg.get("stages", []) or []),
