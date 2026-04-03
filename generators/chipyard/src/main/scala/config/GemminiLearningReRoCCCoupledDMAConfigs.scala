@@ -28,7 +28,8 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
   useDeterministicGlobalNoCRouting: Boolean = false,
   useDummyGemmini: Boolean = false,
   filterDmaVisibleManagers: Boolean = false,
-  connectSbusSlaveToStl: Boolean = false
+  connectSbusSlaveToStl: Boolean = false,
+  sharedSpadBytes: Int = 1024 * 1024
 ) extends Config({
   require(numCores > 0, s"numCores must be > 0, got $numCores")
   require(cpuX > 0 && cpuY > 0, s"cpuX and cpuY must be > 0, got cpuX=$cpuX cpuY=$cpuY")
@@ -46,6 +47,7 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
   require(nMemoryChannels > 0, s"nMemoryChannels must be > 0, got $nMemoryChannels")
   require(freqMHz > 0.0, s"freqMHz must be > 0, got $freqMHz")
   require(meshRows > 0 && meshColumns > 0, s"meshRows and meshColumns must be > 0, got meshRows=$meshRows meshColumns=$meshColumns")
+  require(sharedSpadBytes > 0, s"sharedSpadBytes must be > 0, got $sharedSpadBytes")
 
   val gemminiBeatBytes = sbusWidthBits / 8
   require((gemminiBeatBytes & (gemminiBeatBytes - 1)) == 0, s"sbusWidthBits/8 must be a power of 2 for shared scratchpad, got $gemminiBeatBytes")
@@ -171,7 +173,7 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
   val sharedScratchpadConfig = gemmini.SharedScratchpadConfig(
     enable = true,
     global_base_addr = BigInt("40000000", 16),
-    local_size_bytes = 1024 * 1024,
+    local_size_bytes = sharedSpadBytes,
     local_banks = 1,
     local_bank_interleaved_bytes = gemminiBeatBytes.max(64),
     local_bank_beat_bytes = gemminiBeatBytes,
@@ -256,6 +258,29 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2G2x1x2D2x1x2CoupledDMA
     connectSbusSlaveToStl = true
   )
 
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G4x2x2D4x2x2CoupledDMA
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 4,
+    gemminiX = 2,
+    gemminiY = 2,
+    numDMA = 4,
+    dmaX = 2,
+    dmaY = 2,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 8,
+    meshColumns = 8,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 256 * 1024
+  )
+
 class GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2G2x1x2D2x1x2CoupledDMAFilterOnly
   extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
     numCores = 2,
@@ -319,4 +344,124 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC6C3x2G16x4x4D16x4x4CoupledDMADummy
     useDummyGemmini = true,
     filterDmaVisibleManagers = true,
     connectSbusSlaveToStl = true
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC6C3x2G4x2x2D4x2x2CoupledDMADummy4x4
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 6,
+    cpuX = 3,
+    cpuY = 2,
+    numGemmini = 4,
+    gemminiX = 2,
+    gemminiY = 2,
+    numDMA = 4,
+    dmaX = 2,
+    dmaY = 2,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 4,
+    meshColumns = 4,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC8C4x2G4x2x2D4x2x2CoupledDMADummy16x16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 8,
+    cpuX = 4,
+    cpuY = 2,
+    numGemmini = 4,
+    gemminiX = 2,
+    gemminiY = 2,
+    numDMA = 4,
+    dmaX = 2,
+    dmaY = 2,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC8C4x2G16x4x4D16x4x4CoupledDMADummy16x16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 8,
+    cpuX = 4,
+    cpuY = 2,
+    numGemmini = 16,
+    gemminiX = 4,
+    gemminiY = 4,
+    numDMA = 16,
+    dmaX = 4,
+    dmaY = 4,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC8C4x2G12x4x3D12x4x3CoupledDMADummy16x16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 8,
+    cpuX = 4,
+    cpuY = 2,
+    numGemmini = 12,
+    gemminiX = 4,
+    gemminiY = 3,
+    numDMA = 12,
+    dmaX = 4,
+    dmaY = 3,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G12x4x3D12x4x3CoupledDMADummy16x16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 12,
+    gemminiX = 4,
+    gemminiY = 3,
+    numDMA = 12,
+    dmaX = 4,
+    dmaY = 3,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
   )

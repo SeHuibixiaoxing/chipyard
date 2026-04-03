@@ -20,9 +20,11 @@ Example:
   scripts/firesim-tmux-run.sh buildbitstream -b config_build.yaml -r config_build_recipes.yaml
 
 Environment:
-  FIRESIM_RUNWORKLOAD_WATCHDOG_SECONDS   Override the default 5400s watchdog for
+  FIRESIM_RUNWORKLOAD_WATCHDOG_SECONDS   Override the default 10800s watchdog for
                                          `runworkload`
   FIRESIM_RUNWORKLOAD_WATCHDOG_DISABLE=1 Disable the `runworkload` watchdog
+  FIRESIM_RUNWORKLOAD_MONITOR_SCRIPT     Optional host-side monitor script to
+                                         launch alongside `runworkload`
 EOF
 }
 
@@ -105,13 +107,24 @@ mkdir -p "${state_dir}"
 
 task_name="$1"
 watchdog_enabled=false
-watchdog_timeout_seconds="${FIRESIM_RUNWORKLOAD_WATCHDOG_SECONDS:-5400}"
+watchdog_timeout_seconds="${FIRESIM_RUNWORKLOAD_WATCHDOG_SECONDS:-10800}"
 watchdog_runtime_config=""
 watchdog_hwdb=""
 watchdog_build_recipes=""
 watchdog_log=""
 watchdog_pid_file=""
 watchdog_triggered_file=""
+monitor_script=""
+monitor_pid_file=""
+monitor_log=""
+propagated_env_names=()
+
+append_env_name_if_set() {
+  local env_name="$1"
+  if [[ -n "${!env_name+x}" ]]; then
+    propagated_env_names+=("${env_name}")
+  fi
+}
 
 if [[ "${task_name}" == "runworkload" && "${FIRESIM_RUNWORKLOAD_WATCHDOG_DISABLE:-0}" != "1" ]]; then
   watchdog_enabled=true
@@ -142,6 +155,29 @@ if [[ "${task_name}" == "runworkload" && "${FIRESIM_RUNWORKLOAD_WATCHDOG_DISABLE
   fi
 fi
 
+if [[ "${task_name}" == "runworkload" && -n "${FIRESIM_RUNWORKLOAD_MONITOR_SCRIPT:-}" ]]; then
+  if [[ "${FIRESIM_RUNWORKLOAD_MONITOR_SCRIPT}" = /* ]]; then
+    monitor_script="${FIRESIM_RUNWORKLOAD_MONITOR_SCRIPT}"
+  else
+    monitor_script="${cy_dir}/${FIRESIM_RUNWORKLOAD_MONITOR_SCRIPT}"
+  fi
+
+  if [[ ! -x "${monitor_script}" ]]; then
+    echo "Warning: runworkload monitor script is not executable: ${monitor_script}" >&2
+    monitor_script=""
+  fi
+fi
+
+while IFS='=' read -r env_name _; do
+  if [[ "${env_name}" =~ ^FIRESIM_[A-Za-z0-9_]+$ ]]; then
+    propagated_env_names+=("${env_name}")
+  fi
+done < <(env | sort)
+
+for env_name in JAVA_TOOL_OPTIONS JAVA_HEAP_SIZE MAKEFLAGS SBT_OPTS VERILATOR_MAKEFLAGS; do
+  append_env_name_if_set "${env_name}"
+done
+
 timestamp="$(date -u +%Y-%m-%d--%H-%M-%S)"
 if [[ -z "${session_name}" ]]; then
   sanitized_task="$(printf '%s' "${task_name}" | tr -cs 'A-Za-z0-9_.-' '-')"
@@ -165,10 +201,16 @@ if [[ "${watchdog_enabled}" == true ]]; then
   watchdog_triggered_file="${state_dir}/${session_name}.watchdog.triggered"
 fi
 
+if [[ -n "${monitor_script}" ]]; then
+  monitor_log="${state_dir}/${session_name}.monitor.log"
+  monitor_pid_file="${state_dir}/${session_name}.monitor.pid"
+fi
+
 # Reusing a fixed session name is convenient for long FireSim flows, but stale
 # state files would make monitors read the previous run's status.
 rm -f "${command_file}" "${metadata_file}" "${pane_log}" "${exit_code_file}" \
-  "${watchdog_log}" "${watchdog_pid_file}" "${watchdog_triggered_file}"
+  "${watchdog_log}" "${watchdog_pid_file}" "${watchdog_triggered_file}" \
+  "${monitor_log}" "${monitor_pid_file}"
 
 cat > "${command_file}" <<EOF
 #!/usr/bin/env bash
@@ -185,6 +227,14 @@ watchdog_runtime_config=$(printf '%q' "${watchdog_runtime_config}")
 watchdog_hwdb=$(printf '%q' "${watchdog_hwdb}")
 watchdog_build_recipes=$(printf '%q' "${watchdog_build_recipes}")
 watchdog_pid=""
+monitor_script=$(printf '%q' "${monitor_script}")
+monitor_log=$(printf '%q' "${monitor_log}")
+monitor_pid_file=$(printf '%q' "${monitor_pid_file}")
+monitor_pid=""
+
+$(for env_name in "${propagated_env_names[@]}"; do
+    printf 'export %s=%q\n' "${env_name}" "${!env_name}"
+  done)
 
 cleanup_watchdog() {
   if [[ -n "\${watchdog_pid}" ]]; then
@@ -196,6 +246,14 @@ cleanup_watchdog() {
     fi
   fi
   rm -f "\${watchdog_pid_file}"
+
+  if [[ -n "\${monitor_pid}" ]]; then
+    if kill -0 "\${monitor_pid}" 2>/dev/null; then
+      kill "\${monitor_pid}" 2>/dev/null || true
+      wait "\${monitor_pid}" || true
+    fi
+  fi
+  rm -f "\${monitor_pid_file}"
 }
 
 trap cleanup_watchdog EXIT
@@ -209,6 +267,7 @@ cd deploy
 echo "[firesim-tmux] started at \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[firesim-tmux] working directory: \$PWD"
 echo "[firesim-tmux] command: firesim${quoted_firesim_args}"
+echo "[firesim-tmux] propagated FIRESIM env vars: $(printf '%s ' "${propagated_env_names[@]}")"
 
 set +e
 if [[ "\${watchdog_enabled}" == "true" ]]; then
@@ -300,6 +359,22 @@ PY
   watchdog_pid=\$!
   echo "\${watchdog_pid}" > "\${watchdog_pid_file}"
 
+  if [[ -n "\${monitor_script}" ]]; then
+    echo "[firesim-monitor] starting \${monitor_script}"
+    (
+      exec > >(tee -a "\${monitor_log}") 2>&1
+      export FIRESIM_MONITOR_RUNTIME_CONFIG="\${watchdog_runtime_config}"
+      export FIRESIM_MONITOR_HWDB="\${watchdog_hwdb}"
+      export FIRESIM_MONITOR_BUILD_RECIPES="\${watchdog_build_recipes}"
+      export FIRESIM_MONITOR_SESSION_NAME="${session_name}"
+      export FIRESIM_MONITOR_EXIT_CODE_FILE=$(printf '%q' "${exit_code_file}")
+      export FIRESIM_MONITOR_STATE_DIR=$(printf '%q' "${state_dir}")
+      "\${monitor_script}"
+    ) &
+    monitor_pid=\$!
+    echo "\${monitor_pid}" > "\${monitor_pid_file}"
+  fi
+
   wait "\${firesim_pid}"
   status=\$?
 else
@@ -331,6 +406,7 @@ watchdog_timeout_seconds=${watchdog_timeout_seconds}
 watchdog_log=${watchdog_log}
 watchdog_pid_file=${watchdog_pid_file}
 watchdog_triggered_file=${watchdog_triggered_file}
+propagated_firesim_env=$(printf '%s ' "${propagated_env_names[@]}")
 EOF
 
 tmux new-session -d -s "${session_name}" "${command_file}"
