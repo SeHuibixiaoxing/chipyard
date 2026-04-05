@@ -29,7 +29,9 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
   useDummyGemmini: Boolean = false,
   filterDmaVisibleManagers: Boolean = false,
   connectSbusSlaveToStl: Boolean = false,
-  sharedSpadBytes: Int = 1024 * 1024
+  sharedSpadBytes: Int = 1024 * 1024,
+  useCompactPairedManagerLayout: Boolean = false,
+  globalNoCVirtualChannelDepth: Int = 8
 ) extends Config({
   require(numCores > 0, s"numCores must be > 0, got $numCores")
   require(cpuX > 0 && cpuY > 0, s"cpuX and cpuY must be > 0, got cpuX=$cpuX cpuY=$cpuY")
@@ -48,47 +50,43 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
   require(freqMHz > 0.0, s"freqMHz must be > 0, got $freqMHz")
   require(meshRows > 0 && meshColumns > 0, s"meshRows and meshColumns must be > 0, got meshRows=$meshRows meshColumns=$meshColumns")
   require(sharedSpadBytes > 0, s"sharedSpadBytes must be > 0, got $sharedSpadBytes")
+  require(globalNoCVirtualChannelDepth > 0, s"globalNoCVirtualChannelDepth must be > 0, got $globalNoCVirtualChannelDepth")
 
   val gemminiBeatBytes = sbusWidthBits / 8
   require((gemminiBeatBytes & (gemminiBeatBytes - 1)) == 0, s"sbusWidthBits/8 must be a power of 2 for shared scratchpad, got $gemminiBeatBytes")
 
   val totalManagers = numGemmini + numDMA
 
-  val nocCols = Seq(cpuX, gemminiX, dmaX, nMemoryChannels + 1).max
-  val infraRows = (nMemoryChannels + 1 + nocCols - 1) / nocCols
-  val cpuRowBase = 0
-  val gemminiRowBase = cpuRowBase + cpuY
-  val dmaRowBase = gemminiRowBase + gemminiY
-  val infraRowBase = dmaRowBase + dmaY
-  val nocRows = infraRowBase + infraRows
+  val layout = GemminiLearningReRoCCCoupledDMAConfigHelpers.buildLayout(
+    numCores = numCores,
+    cpuX = cpuX,
+    cpuY = cpuY,
+    numGemmini = numGemmini,
+    gemminiX = gemminiX,
+    gemminiY = gemminiY,
+    numDMA = numDMA,
+    dmaX = dmaX,
+    dmaY = dmaY,
+    nMemoryChannels = nMemoryChannels,
+    extraInfraEndpoints = 2,
+    useCompactPairedManagerLayout = useCompactPairedManagerLayout
+  )
 
-  val cpuNodes = (0 until numCores).map { i =>
-    val row = cpuRowBase + (i / cpuX)
-    val col = i % cpuX
-    row * nocCols + col
-  }
-
-  val gemminiNodes = (0 until numGemmini).map { i =>
-    val row = gemminiRowBase + (i / gemminiX)
-    val col = i % gemminiX
-    row * nocCols + col
-  }
-
-  val dmaNodes = (0 until numDMA).map { i =>
-    val row = dmaRowBase + (i / dmaX)
-    val col = i % dmaX
-    row * nocCols + col
-  }
-
-  val managerNodes = gemminiNodes ++ dmaNodes
-
-  val infraNodes = (0 until (infraRows * nocCols)).map { i =>
-    val row = infraRowBase + (i / nocCols)
-    val col = i % nocCols
-    row * nocCols + col
-  }
+  val nocCols = layout.nocCols
+  val nocRows = layout.nocRows
+  val cpuNodes = layout.cpuNodes
+  val managerNodes = layout.managerNodes
+  val gemminiNodes = managerNodes.take(numGemmini)
+  val dmaNodes = managerNodes.drop(numGemmini)
+  val infraNodes = layout.infraNodes
   val systemNodes = infraNodes.take(nMemoryChannels)
   val pbusNode = infraNodes(nMemoryChannels)
+  val serialTlNode = infraNodes(nMemoryChannels + 1)
+  val activeNodes = cpuNodes ++ managerNodes ++ systemNodes ++ Seq(pbusNode, serialTlNode)
+
+  require(activeNodes.distinct.size == activeNodes.size, "NoC node assignments must be unique")
+  require(activeNodes.forall(node => node >= 0 && node < nocCols * nocRows),
+    s"NoC node assignments must fit within ${nocCols}x${nocRows} mesh")
 
   val sbusInNodeMapping = ListMap((
     cpuNodes.zipWithIndex.map { case (node, i) => s"Core $i " -> node } ++
@@ -98,11 +96,18 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
           s"port_named_rerocc_${i}[" -> node
         )
       } ++
-      Seq("serial_tl" -> pbusNode)
+      Seq("serial_tl" -> serialTlNode)
   ): _*)
 
   val sbusOutNodeMapping = ListMap((
     managerNodes.zipWithIndex.map { case (node, i) => s"sport_named_rerocc_${i}[" -> node } ++
+      (if (connectSbusSlaveToStl) {
+        managerNodes.zipWithIndex.map { case (node, i) =>
+          s"sport_named_rerocc_sbus_${i}[" -> node
+        }
+      } else {
+        Seq.empty
+      }) ++
       gemminiNodes.zipWithIndex.map { case (node, i) => s"Gemmini${i}-" -> node } ++
       systemNodes.zipWithIndex.map { case (node, i) => s"system[$i]" -> node } ++
       Seq("pbus" -> pbusNode)
@@ -138,7 +143,7 @@ class GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
 
   val globalNoCParams = constellation.noc.NoCParams(
     topology = TerminalRouter(Mesh2D(nocCols, nocRows)),
-    channelParamGen = (a, b) => UserChannelParams(Seq.fill(7) { UserVirtualChannelParams(8) }),
+    channelParamGen = (a, b) => UserChannelParams(Seq.fill(7) { UserVirtualChannelParams(globalNoCVirtualChannelDepth) }),
     routingRelation = globalNoCRoutingRelation,
     skipValidationChecks = true
   )
@@ -454,6 +459,228 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G12x4x3D12x4x3CoupledDMADummy
     dmaX = 4,
     dmaY = 3,
     sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G12x4x3D12x4x3CoupledDMADummy16x16Sbus256
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 12,
+    gemminiX = 4,
+    gemminiY = 3,
+    numDMA = 12,
+    dmaX = 4,
+    dmaY = 3,
+    sbusWidthBits = 32 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairedManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G12x4x3D12x4x3CoupledDMADummy16x16Sbus128
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 12,
+    gemminiX = 4,
+    gemminiY = 3,
+    numDMA = 12,
+    dmaX = 4,
+    dmaY = 3,
+    sbusWidthBits = 16 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairedManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G12x4x3D12x4x3CoupledDMADummy16x16Sbus16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 12,
+    gemminiX = 4,
+    gemminiY = 3,
+    numDMA = 12,
+    dmaX = 4,
+    dmaY = 3,
+    sbusWidthBits = 2 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairedManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G10x5x2D10x5x2CoupledDMADummy16x16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 10,
+    gemminiX = 5,
+    gemminiY = 2,
+    numDMA = 10,
+    dmaX = 5,
+    dmaY = 2,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G10x5x2D10x5x2CoupledDMADummy16x16Sbus256
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 10,
+    gemminiX = 5,
+    gemminiY = 2,
+    numDMA = 10,
+    dmaX = 5,
+    dmaY = 2,
+    sbusWidthBits = 32 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC2C2x1G10x5x2D10x5x2CoupledDMADummy16x16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 2,
+    cpuX = 2,
+    cpuY = 1,
+    numGemmini = 10,
+    gemminiX = 5,
+    gemminiY = 2,
+    numDMA = 10,
+    dmaX = 5,
+    dmaY = 2,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC2C2x1G10x5x2D10x5x2CoupledDMADummy16x16Sbus256
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 2,
+    cpuX = 2,
+    cpuY = 1,
+    numGemmini = 10,
+    gemminiX = 5,
+    gemminiY = 2,
+    numDMA = 10,
+    dmaX = 5,
+    dmaY = 2,
+    sbusWidthBits = 32 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC2C2x1G8x4x2D8x4x2CoupledDMADummy16x16
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 2,
+    cpuX = 2,
+    cpuY = 1,
+    numGemmini = 8,
+    gemminiX = 4,
+    gemminiY = 2,
+    numDMA = 8,
+    dmaX = 4,
+    dmaY = 2,
+    sbusWidthBits = 64 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC2C2x1G8x4x2D8x4x2CoupledDMADummy16x16Sbus256
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 2,
+    cpuX = 2,
+    cpuY = 1,
+    numGemmini = 8,
+    gemminiX = 4,
+    gemminiY = 2,
+    numDMA = 8,
+    dmaX = 4,
+    dmaY = 2,
+    sbusWidthBits = 32 * 8,
     nMemoryChannels = 2,
     freqMHz = 1000.0,
     meshRows = 16,
