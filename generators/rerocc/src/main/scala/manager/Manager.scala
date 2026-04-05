@@ -31,9 +31,11 @@ class MiniDCache(reRoCCId: Int, crossing: ClockCrossingType)(implicit p: Paramet
     requestFifo   = true))
 }
 
-class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, roccOpcode: UInt)(implicit p: Parameters) extends LazyModule {
+class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, supportedOpcodes: Seq[UInt])(implicit p: Parameters) extends LazyModule {
+  require(supportedOpcodes.nonEmpty, "ReRoCCManager requires at least one supported opcode")
   val node = ReRoCCManagerNode(ReRoCCManagerParams(reRoCCTileParams.reroccId))
   val ibufEntries = p(ReRoCCIBufEntriesKey)
+  private val defaultOpcode = supportedOpcodes.head
   override lazy val module = new Impl
   class Impl extends LazyModuleImp(this) {
     val io = IO(new Bundle {
@@ -81,7 +83,9 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, roccOpcode: UInt)(implic
     val next_enq_inst = WireInit(enq_inst)
     inst_q.io.enq.valid := false.B
     inst_q.io.enq.bits := next_enq_inst
-    inst_q.io.enq.bits.inst.opcode := roccOpcode
+    if (!reRoCCTileParams.preserveIncomingOpcode) {
+      inst_q.io.enq.bits.inst.opcode := defaultOpcode
+    }
 
     // 0 -> acquire ack
     // 1 -> inst ack
@@ -117,9 +121,12 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, roccOpcode: UInt)(implic
 
         when (req_beat === 0.U) {
           val inst = rr_req.bits.data.asTypeOf(new RoCCInstruction)
-          enq_inst.inst := inst
-          when (!inst.xs1        ) { enq_inst.rs1 := 0.U }
-          when (!inst.xs2        ) { enq_inst.rs2 := 0.U }
+          val opcodeValid = supportedOpcodes.map(_ === inst.opcode).reduce(_ || _)
+          assert(opcodeValid, "ReRoCC manager received an unsupported incoming opcode")
+          next_enq_inst.inst := inst
+          when (!inst.xs1        ) { next_enq_inst.rs1 := 0.U }
+          when (!inst.xs2        ) { next_enq_inst.rs2 := 0.U }
+          enq_inst := next_enq_inst
         } .otherwise {
           val enq_inst_rs1      = enq_inst.inst.xs1 && req_beat === 1.U
           val enq_inst_rs2      = enq_inst.inst.xs2 && req_beat === Mux(enq_inst.inst.xs1, 2.U, 1.U)
@@ -205,8 +212,8 @@ class ReRoCCManagerTile()(implicit p: Parameters) extends LazyModule {
   val reroccManagerIdSinkNode = BundleBridgeSink[UInt]()
 
   val rocc = reRoCCParams.genRoCC.get(p)
-  require(rocc.opcodes.opcodes.size == 1)
-  val rerocc_manager = LazyModule(new ReRoCCManager(reRoCCParams, rocc.opcodes.opcodes.head))
+  require(rocc.opcodes.opcodes.nonEmpty)
+  val rerocc_manager = LazyModule(new ReRoCCManager(reRoCCParams, rocc.opcodes.opcodes))
   val reRoCCNode = ReRoCCIdentityNode()
   rerocc_manager.node := ReRoCCBuffer() := reRoCCNode
   val tlNode = p(TileVisibilityNodeKey) // throttle before TL Node (merged ->

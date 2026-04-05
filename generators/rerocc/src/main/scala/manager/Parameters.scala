@@ -21,7 +21,8 @@ case class ReRoCCTileParams(
   l2TLBWays: Int = 4,
   pgLevels: Int = 3,
   filterDmaVisibleManagers: Boolean = false,
-  connectSbusSlaveToStl: Boolean = false
+  connectSbusSlaveToStl: Boolean = false,
+  preserveIncomingOpcode: Boolean = false
 ) extends TileParams {
   val core = new EmptyCoreParams(l2TLBEntries, l2TLBWays, pgLevels)
   val icache = None
