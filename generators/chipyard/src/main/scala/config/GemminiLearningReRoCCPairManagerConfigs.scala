@@ -28,7 +28,9 @@ class GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
   connectSbusSlaveToStl: Boolean = false,
   sharedSpadBytes: Int = 1024 * 1024,
   useCompactPairManagerLayout: Boolean = false,
-  globalNoCVirtualChannelDepth: Int = 8
+  globalNoCVirtualChannelDepth: Int = 8,
+  pairTlMaxInFlight: Option[Int] = None,
+  pairAtlMaxInFlight: Option[Int] = None
 ) extends Config({
   require(numCores > 0, s"numCores must be > 0, got $numCores")
   require(cpuX > 0 && cpuY > 0, s"cpuX and cpuY must be > 0, got cpuX=$cpuX cpuY=$cpuY")
@@ -175,7 +177,9 @@ class GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
       new chipyard.config.WithReRoCCGemminiCoupledDMAPairManagers(
         numPairs = numPairs,
         gemminiIdBase = 0,
-        sharedScratchpadConfig = sharedScratchpadConfig
+        sharedScratchpadConfig = sharedScratchpadConfig,
+        tlMaxInFlight = pairTlMaxInFlight,
+        atlMaxInFlight = pairAtlMaxInFlight
       )(
         gemmini.GemminiConfigs.dummyConfig.copy(
           opcodes = OpcodeSet.custom3,
@@ -189,7 +193,9 @@ class GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
       new chipyard.config.WithReRoCCGemminiCoupledDMAPairManagers(
         numPairs = numPairs,
         gemminiIdBase = 0,
-        sharedScratchpadConfig = sharedScratchpadConfig
+        sharedScratchpadConfig = sharedScratchpadConfig,
+        tlMaxInFlight = pairTlMaxInFlight,
+        atlMaxInFlight = pairAtlMaxInFlight
       )(
         gemmini.GemminiConfigs.defaultConfig.copy(
           opcodes = OpcodeSet.custom3,
@@ -245,4 +251,79 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P2x1x2CoupledDMAPairManager
     sharedSpadBytes = 1024 * 1024,
     useCompactPairManagerLayout = false,
     globalNoCVirtualChannelDepth = 8
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P8x4x2CoupledDMAPairManagerDummy16x16Sbus256
+  extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numPairs = 8,
+    pairX = 4,
+    pairY = 2,
+    sbusWidthBits = 32 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4,
+    pairTlMaxInFlight = Some(64),
+    pairAtlMaxInFlight = Some(64)
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P12x4x3CoupledDMAPairManagerDummy16x16Sbus256
+  extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numPairs = 12,
+    pairX = 4,
+    pairY = 3,
+    sbusWidthBits = 32 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4,
+    pairTlMaxInFlight = Some(64),
+    pairAtlMaxInFlight = Some(64)
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P12x4x3CoupledDMAPairManagerDummy16x16Sbus128
+  extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numPairs = 12,
+    pairX = 4,
+    pairY = 3,
+    sbusWidthBits = 16 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4,
+    pairTlMaxInFlight = Some(64),
+    pairAtlMaxInFlight = Some(64)
   )

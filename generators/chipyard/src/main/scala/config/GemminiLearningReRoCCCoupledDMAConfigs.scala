@@ -423,6 +423,32 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC8C4x2G16x4x4D16x4x4CoupledDMADummy
     sharedSpadBytes = 1024 * 1024
   )
 
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2G16x4x4D16x4x4CoupledDMADummy16x16Sbus128
+  extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numGemmini = 16,
+    gemminiX = 4,
+    gemminiY = 4,
+    numDMA = 16,
+    dmaX = 4,
+    dmaY = 4,
+    sbusWidthBits = 16 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairedManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4
+  )
+
 class GemminiLearningConfigSpadReRoCCGlobalNoC8C4x2G12x4x3D12x4x3CoupledDMADummy16x16
   extends GemminiLearningConfigSpadReRoCCNoCCoupledDMAParametric(
     numCores = 8,

@@ -11,7 +11,9 @@ import gemmini._
 class WithReRoCCGemminiCoupledDMAPairManagers[T <: Data : Arithmetic, U <: Data, V <: Data](
   numPairs: Int,
   gemminiIdBase: Int = 0,
-  sharedScratchpadConfig: SharedScratchpadConfig = SharedScratchpadConfig()
+  sharedScratchpadConfig: SharedScratchpadConfig = SharedScratchpadConfig(),
+  tlMaxInFlight: Option[Int] = None,
+  atlMaxInFlight: Option[Int] = None
 )(
   gemminiConfig: GemminiArrayConfig[T, U, V] = GemminiConfigs.defaultConfig
 ) extends Config((site, here, up) => {
@@ -24,7 +26,9 @@ class WithReRoCCGemminiCoupledDMAPairManagers[T <: Data : Arithmetic, U <: Data,
         LazyModule(new GemminiCoupledDMAPairWrapper(
           gemminiConfig,
           gemminiIdBase + i,
-          sharedScratchpadConfig
+          sharedScratchpadConfig,
+          tlMaxInFlight = tlMaxInFlight,
+          atlMaxInFlight = atlMaxInFlight
         ))
       }
     }
