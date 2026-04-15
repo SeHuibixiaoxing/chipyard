@@ -1,0 +1,34 @@
+schema_version: 1
+targets:
+  rerocc_globalnoc_coupleddma_c2_g2_d2_spad1024kb_dram19_noc64_mac1024:
+    target_key: rerocc_globalnoc_coupleddma_c2_g2_d2_spad1024kb_dram19_noc64_mac1024
+    chipyard_config: GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2G2x1x2D2x1x2CoupledDMA
+    num_cores: 2
+    num_gemmini: 2
+    num_dma: 2
+    shared_spad_local_size_bytes: 1048576
+    shared_spad_global_base_addr: 0x40000000
+    per_acc_spm_kb: 1024
+    num_macs_per_array: 1024
+    dram_bw_per_cycle: 19
+    noc_bw_per_cycle: 64
+    sbus_width_bits: 512
+    memory_channels: 2
+    default_batch: 16
+    pages_per_acc: 1024
+  rerocc_globalnoc_pairmanager_dummy16x16_c4_g12_d12_spad1024kb_dram19_noc64_mac256_sbus128:
+    target_key: rerocc_globalnoc_pairmanager_dummy16x16_c4_g12_d12_spad1024kb_dram19_noc64_mac256_sbus128
+    chipyard_config: GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P12x4x3CoupledDMAPairManagerDummy16x16Sbus128
+    num_cores: 4
+    num_gemmini: 12
+    num_dma: 12
+    shared_spad_local_size_bytes: 1048576
+    shared_spad_global_base_addr: 0x40000000
+    per_acc_spm_kb: 1024
+    num_macs_per_array: 256
+    dram_bw_per_cycle: 19
+    noc_bw_per_cycle: 64
+    sbus_width_bits: 128
+    memory_channels: 2
+    default_batch: 8
+    pages_per_acc: 1024

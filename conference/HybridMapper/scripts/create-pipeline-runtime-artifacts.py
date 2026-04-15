@@ -60,6 +60,7 @@ if str(HYBRIDMAPPER_ROOT) not in sys.path:
 
 METHODS = ("ours2", "gemini2", "tangram2")
 INTERMEDIATE_FILENAME_FMT = "{acc}_{spm_per_acc_kb}_{batch}_{dram_bw}_{noc_bw}_{method}.yaml"
+PIPELINE_PAGE_SIZE_BYTES = 1024
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,7 @@ STEP1_TARGET = RuntimeHardwareTarget(
 TARGETS: Dict[str, RuntimeHardwareTarget] = {
     STEP1_TARGET.target_key: STEP1_TARGET,
 }
+DEFAULT_TARGETS_YAML = HYBRIDMAPPER_ROOT / "config" / "pipeline_runtime_hardware_targets.yaml"
 
 
 def ensure_dir(path: Path):
@@ -135,6 +137,111 @@ def load_yaml(path: Path):
         if RuamelYAML is not None:
             return RuamelYAML(typ="safe").load(f)
         return pyyaml.safe_load(f)
+
+
+def parse_intish(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise RuntimeError(f"invalid boolean for {field_name}")
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise RuntimeError(f"empty value for {field_name}")
+        base = 16 if text.lower().startswith("0x") else 10
+        return int(text, base)
+    raise RuntimeError(f"unsupported value for {field_name}: {value!r}")
+
+
+def validate_runtime_target(target: RuntimeHardwareTarget, source_name: str) -> None:
+    positive_fields = (
+        ("num_cores", target.num_cores),
+        ("num_gemmini", target.num_gemmini),
+        ("num_dma", target.num_dma),
+        ("shared_spad_local_size_bytes", target.shared_spad_local_size_bytes),
+        ("per_acc_spm_kb", target.per_acc_spm_kb),
+        ("num_macs_per_array", target.num_macs_per_array),
+        ("dram_bw_per_cycle", target.dram_bw_per_cycle),
+        ("noc_bw_per_cycle", target.noc_bw_per_cycle),
+        ("sbus_width_bits", target.sbus_width_bits),
+        ("memory_channels", target.memory_channels),
+        ("default_batch", target.default_batch),
+        ("pages_per_acc", target.pages_per_acc),
+    )
+    for field_name, value in positive_fields:
+        if int(value) <= 0:
+            raise RuntimeError(
+                f"invalid runtime target field {field_name}={value} from {source_name} for {target.target_key}"
+            )
+    if not target.chipyard_config:
+        raise RuntimeError(f"missing chipyard_config in {source_name} for {target.target_key}")
+    if target.sbus_width_bits % 8 != 0:
+        raise RuntimeError(f"sbus_width_bits must be byte-aligned in {source_name} for {target.target_key}")
+    if target.shared_spad_local_size_bytes % PIPELINE_PAGE_SIZE_BYTES != 0:
+        raise RuntimeError(
+            f"shared_spad_local_size_bytes must align to page size in {source_name} for {target.target_key}"
+        )
+    if target.shared_spad_global_base_addr < 0:
+        raise RuntimeError(f"shared_spad_global_base_addr must be non-negative in {source_name} for {target.target_key}")
+
+
+def runtime_target_from_raw(target_key: str, raw: Dict[str, Any], source_name: str) -> RuntimeHardwareTarget:
+    if not isinstance(raw, dict):
+        raise RuntimeError(f"target {target_key} in {source_name} must be a mapping")
+    declared_key = str(value_or_default(raw.get("target_key", target_key), target_key))
+    if declared_key != target_key:
+        raise RuntimeError(f"target key mismatch in {source_name}: map key={target_key} declared={declared_key}")
+    target = RuntimeHardwareTarget(
+        target_key=target_key,
+        chipyard_config=str(raw.get("chipyard_config", "") or ""),
+        num_cores=parse_intish(raw.get("num_cores"), f"{target_key}.num_cores"),
+        num_gemmini=parse_intish(raw.get("num_gemmini"), f"{target_key}.num_gemmini"),
+        num_dma=parse_intish(raw.get("num_dma"), f"{target_key}.num_dma"),
+        shared_spad_local_size_bytes=parse_intish(
+            raw.get("shared_spad_local_size_bytes"), f"{target_key}.shared_spad_local_size_bytes"
+        ),
+        shared_spad_global_base_addr=parse_intish(
+            value_or_default(raw.get("shared_spad_global_base_addr"), 0x40000000),
+            f"{target_key}.shared_spad_global_base_addr",
+        ),
+        per_acc_spm_kb=parse_intish(raw.get("per_acc_spm_kb"), f"{target_key}.per_acc_spm_kb"),
+        num_macs_per_array=parse_intish(raw.get("num_macs_per_array"), f"{target_key}.num_macs_per_array"),
+        dram_bw_per_cycle=parse_intish(raw.get("dram_bw_per_cycle"), f"{target_key}.dram_bw_per_cycle"),
+        noc_bw_per_cycle=parse_intish(raw.get("noc_bw_per_cycle"), f"{target_key}.noc_bw_per_cycle"),
+        sbus_width_bits=parse_intish(raw.get("sbus_width_bits"), f"{target_key}.sbus_width_bits"),
+        memory_channels=parse_intish(raw.get("memory_channels"), f"{target_key}.memory_channels"),
+        default_batch=parse_intish(raw.get("default_batch"), f"{target_key}.default_batch"),
+        pages_per_acc=parse_intish(raw.get("pages_per_acc"), f"{target_key}.pages_per_acc"),
+    )
+    validate_runtime_target(target, source_name)
+    return target
+
+
+def resolve_optional_path(path_text: str | None, base_dir: Path) -> Path | None:
+    if not path_text:
+        return None
+    raw_path = Path(path_text).expanduser()
+    if raw_path.is_absolute():
+        return raw_path
+    if raw_path.exists():
+        return raw_path.resolve()
+    return base_dir / raw_path
+
+
+def load_runtime_targets(targets_yaml_path: Path | None) -> Dict[str, RuntimeHardwareTarget]:
+    loaded: Dict[str, RuntimeHardwareTarget] = dict(TARGETS)
+    if targets_yaml_path is None:
+        return loaded
+    if not targets_yaml_path.is_file():
+        raise RuntimeError(f"hardware targets yaml not found: {targets_yaml_path}")
+    doc = load_yaml(targets_yaml_path) or {}
+    raw_targets = doc.get("targets", doc)
+    if not isinstance(raw_targets, dict):
+        raise RuntimeError(f"hardware targets yaml must contain a targets map: {targets_yaml_path}")
+    for target_key, raw in raw_targets.items():
+        key_text = str(target_key)
+        loaded[key_text] = runtime_target_from_raw(key_text, raw, str(targets_yaml_path))
+    return loaded
 
 
 def dump_yaml(path: Path, data: object):
@@ -221,6 +328,12 @@ def layer_to_split_kind(layer: Any, target_accel: int) -> str:
     if is_resadd(layer):
         return "resadd_spatial"
     return "single"
+
+
+def ceil_div(numer: int, denom: int) -> int:
+    if denom <= 0:
+        raise RuntimeError(f"invalid ceil_div denominator: {denom}")
+    return (numer + denom - 1) // denom
 
 
 def load_layer_specs_from_model_yaml(path: Path) -> List[dict]:
@@ -310,6 +423,14 @@ def runtime_golden_filename(target: RuntimeHardwareTarget, method: str) -> str:
 
 def runtime_manifest_filename(target: RuntimeHardwareTarget) -> str:
     return f"manifest.{target.target_key}.yaml"
+
+
+def intermediate_graph_partition_yaml_filename(target: RuntimeHardwareTarget) -> str:
+    return f"model_partition.{target.target_key}.yaml"
+
+
+def intermediate_graph_partition_dump_filename(target: RuntimeHardwareTarget) -> str:
+    return f"model_partition.{target.target_key}.dump"
 
 
 def resolve_legacy_source_dir(model_name: str, override: str) -> Path | None:
@@ -640,6 +761,25 @@ def build_segment_runtime_layout(seg: Dict[str, Any], layer_mapping_by_layer: Di
     stages = seg.get("stages", []) or []
     shared_groups: Dict[int, Dict[str, int]] = {}
     buffer_bindings: List[Dict[str, int | str]] = []
+    tensor_semantics: Dict[int, Dict[str, Any]] = {}
+
+    def record_tensor_binding(tensor_id: int, tensor_type: str, local_bytes: int, is_entry: int) -> None:
+        info = tensor_semantics.setdefault(
+            int(tensor_id),
+            {
+                "types": set(),
+                "bytes": [],
+                "entry_count": 0,
+                "export_count": 0,
+            },
+        )
+        info["types"].add(str(tensor_type))
+        if local_bytes > 0:
+            info["bytes"].append(int(local_bytes))
+        if is_entry:
+            info["entry_count"] += 1
+        else:
+            info["export_count"] += 1
 
     for stage_local_id, stage_group in enumerate(stages):
         if not isinstance(stage_group, list) or len(stage_group) != 1 or not isinstance(stage_group[0], dict):
@@ -722,7 +862,9 @@ def build_segment_runtime_layout(seg: Dict[str, Any], layer_mapping_by_layer: Di
                 tensor_idx = tensor_ids.index(int(tensor_id))
                 slot_count = 2 if int(double_buffer) else 1
                 pages_per_slot = int(local_page_count[tensor_idx])
+                local_bytes = int(local_tensor_bytes[tensor_idx])
                 alias_group_id = 0
+                record_tensor_binding(int(tensor_id), str(tensor_type), local_bytes, int(is_entry))
                 if str(tensor_type) == "SHARED_SPM":
                     info = shared_groups.setdefault(
                         int(tensor_id),
@@ -779,6 +921,55 @@ def build_segment_runtime_layout(seg: Dict[str, Any], layer_mapping_by_layer: Di
     ring_count = {int(k): int(v) for k, v in (seg.get("ring_buffer_count", {}) or {}).items()}
     ring_size_per = {int(k): int(v) for k, v in (seg.get("ring_buffer_size_per", {}) or {}).items()}
     ring_total_pages = {int(k): int(v) for k, v in (seg.get("tensor_spm_util_in_ringbuffer", {}) or {}).items()}
+    transport_effective_bytes: Dict[int, int] = {}
+    ring_slot_effective_bytes: Dict[int, int] = {}
+    expected_ring_pages_per_slot: Dict[int, int] = {}
+    if stages:
+        first_stage = stages[0][0]
+        last_stage = stages[-1][0]
+        first_stage_all_ring_entry = {
+            int(tensor_id)
+            for tensor_id, tensor_type in zip(
+                to_int_list(first_stage.get("entryTensorIdList", [])),
+                [str(v) for v in (first_stage.get("entryTensorTypeList", []) or [])],
+            )
+            if tensor_type == "ALL_RINGBUFFER"
+        }
+        last_stage_all_ring_export = {
+            int(tensor_id)
+            for tensor_id, tensor_type in zip(
+                to_int_list(last_stage.get("exportTensorIdList", [])),
+                [str(v) for v in (last_stage.get("exportTensorTypeList", []) or [])],
+            )
+            if tensor_type == "ALL_RINGBUFFER"
+        }
+        boundary_all_ring = sorted(first_stage_all_ring_entry | last_stage_all_ring_export)
+        if boundary_all_ring:
+            raise RuntimeError(
+                f"segment {seg.get('segment_idx', 0)} lowers boundary tensors to ALL_RINGBUFFER: {boundary_all_ring}"
+            )
+
+    for tensor_id, info in sorted(tensor_semantics.items()):
+        tensor_types = set(info["types"])
+        local_bytes_vec = [int(v) for v in info["bytes"]]
+        min_bytes = min(local_bytes_vec) if local_bytes_vec else 0
+        max_bytes = max(local_bytes_vec) if local_bytes_vec else 0
+        if "ALL_RINGBUFFER" in tensor_types:
+            if tensor_types != {"ALL_RINGBUFFER"}:
+                raise RuntimeError(
+                    f"tensor {tensor_id} mixes ALL_RINGBUFFER with other tensor types: {sorted(tensor_types)}"
+                )
+            if max_bytes <= 0:
+                raise RuntimeError(f"tensor {tensor_id} ALL_RINGBUFFER has no positive local bytes")
+            ring_slot_effective_bytes[tensor_id] = max_bytes
+            expected_ring_pages_per_slot[tensor_id] = ceil_div(max_bytes, PIPELINE_PAGE_SIZE_BYTES)
+            continue
+        if "ISOLATE_SPM" in tensor_types or "DRAM_DEPEN" in tensor_types:
+            if min_bytes <= 0:
+                raise RuntimeError(f"tensor {tensor_id} transport type has no positive local bytes")
+            transport_effective_bytes[tensor_id] = min_bytes
+            expected_ring_pages_per_slot[tensor_id] = ceil_div(min_bytes, PIPELINE_PAGE_SIZE_BYTES)
+
     for tensor_id, count in sorted(ring_count.items()):
         if count <= 0:
             continue
@@ -786,6 +977,12 @@ def build_segment_runtime_layout(seg: Dict[str, Any], layer_mapping_by_layer: Di
         if pages_per_slot <= 0:
             total_pages = int(ring_total_pages.get(tensor_id, 0) or 0)
             pages_per_slot = (total_pages + count - 1) // count if total_pages > 0 else 0
+        expected_pages = int(expected_ring_pages_per_slot.get(tensor_id, pages_per_slot))
+        if expected_pages > 0 and pages_per_slot != expected_pages:
+            raise RuntimeError(
+                f"segment {seg.get('segment_idx', 0)} tensor {tensor_id} ring pages_per_slot={pages_per_slot} "
+                f"does not match expected {expected_pages}"
+            )
         buffer_bindings.append(
             {
                 "buffer_id": next_buffer_id,
@@ -809,6 +1006,8 @@ def build_segment_runtime_layout(seg: Dict[str, Any], layer_mapping_by_layer: Di
     seg["bufferBindingSlotCountList"] = [int(item["slot_count"]) for item in buffer_bindings]
     seg["bufferBindingPagesPerSlotList"] = [int(item["pages_per_slot"]) for item in buffer_bindings]
     seg["bufferBindingAliasGroupIdList"] = [int(item["alias_group_id"]) for item in buffer_bindings]
+    seg["transport_effective_bytes"] = {int(k): int(v) for k, v in sorted(transport_effective_bytes.items())}
+    seg["ring_slot_effective_bytes"] = {int(k): int(v) for k, v in sorted(ring_slot_effective_bytes.items())}
 
     for stage_group in stages:
         stage = stage_group[0]
@@ -1070,11 +1269,17 @@ def build_target_object(hm: Dict[str, Any], target: RuntimeHardwareTarget):
 
 
 def ensure_graph_partition(hm: Dict[str, Any], model: Any, mapping_dir: Path, intermediate_dir: Path, target: RuntimeHardwareTarget):
-    graph_yaml = intermediate_dir / "model_partition.yaml"
-    graph_dump = intermediate_dir / "model_partition.dump"
+    graph_yaml = intermediate_dir / intermediate_graph_partition_yaml_filename(target)
+    graph_dump = intermediate_dir / intermediate_graph_partition_dump_filename(target)
     if graph_yaml.exists() and graph_dump.exists():
         with graph_dump.open("rb") as f:
-            return pickle.load(f)
+            record = pickle.load(f)
+        try:
+            find_full_model_candidate(hm, record, model, target)
+        except Exception:
+            pass
+        else:
+            return record
 
     model.load_layer_mapping(str(mapping_dir))
     partitioner = hm["GraphPartitioner"](
@@ -1371,6 +1576,11 @@ def parse_args():
         help="comma-separated hardware target keys",
     )
     parser.add_argument(
+        "--hardware-targets-yaml",
+        default=str(DEFAULT_TARGETS_YAML),
+        help="hardware target catalog YAML, absolute or relative to conference/HybridMapper",
+    )
+    parser.add_argument(
         "--mode",
         choices=("auto", "fresh", "legacy"),
         default="auto",
@@ -1406,13 +1616,15 @@ def main():
     target_keys = parse_csv(args.target_keys)
     if not target_keys:
         raise SystemExit("no target keys selected")
+    targets_yaml_path = resolve_optional_path(args.hardware_targets_yaml, HYBRIDMAPPER_ROOT)
+    targets = load_runtime_targets(targets_yaml_path)
 
     target_manifests: Dict[str, Dict[str, Any]] = {}
     runtime_dir: Path | None = None
     for target_key in target_keys:
-        if target_key not in TARGETS:
+        if target_key not in targets:
             raise SystemExit(f"unsupported target key: {target_key}")
-        target = TARGETS[target_key]
+        target = targets[target_key]
         runtime_dir, manifest = ensure_runtime_artifacts(
             model_name=args.model,
             target=target,

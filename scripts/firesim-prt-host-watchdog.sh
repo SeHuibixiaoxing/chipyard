@@ -16,18 +16,21 @@ ssh_connect_timeout_seconds="${FIRESIM_MONITOR_SSH_CONNECT_TIMEOUT_SECONDS:-10}"
 probe_timeout_seconds="${FIRESIM_MONITOR_PROBE_TIMEOUT_SECONDS:-20}"
 capture_timeout_seconds="${FIRESIM_MONITOR_CAPTURE_TIMEOUT_SECONDS:-180}"
 arm_marker="${FIRESIM_MONITOR_ARM_MARKER:-[firemarshal] watchdog armed at wrapper launch}"
-arm_on_guest_status_nonzero="${FIRESIM_MONITOR_ARM_ON_GUEST_STATUS_NONZERO:-0}"
+arm_on_guest_status_nonzero="${FIRESIM_MONITOR_ARM_ON_GUEST_STATUS_NONZERO:-1}"
 complete_regex="${FIRESIM_MONITOR_COMPLETE_REGEX:-BERTMINI_PIPELINE_RUNTIME_PASS|BERTMINI_PIPELINE_RUNTIME_FAIL|\\[firemarshal\\] pipeline-runtime exited|\\[firemarshal\\] powering off guest}"
 guest_log_path="${FIRESIM_MONITOR_GUEST_LOG_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.deep.log}"
 guest_sparse_log_path="${FIRESIM_MONITOR_GUEST_SPARSE_LOG_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.log}"
 guest_status_path="${FIRESIM_MONITOR_GUEST_STATUS_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.status}"
-guest_proc_stage_path="${FIRESIM_MONITOR_GUEST_PROC_STAGE_PATH:-}"
-guest_runner_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_STAGE_PATH:-}"
-guest_runner_post_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_POST_STAGE_PATH:-}"
-guest_runner_early_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_EARLY_STAGE_PATH:-}"
+guest_proc_stage_path="${FIRESIM_MONITOR_GUEST_PROC_STAGE_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.wrapper-proc.stage}"
+guest_runner_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_STAGE_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.runner.stage}"
+guest_runner_post_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_POST_STAGE_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.wrapper.stage}"
+guest_runner_early_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_EARLY_STAGE_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.runner-early.stage}"
 guest_binary_stage_path="${FIRESIM_MONITOR_GUEST_BINARY_STAGE_PATH:-}"
-guest_runner_proc_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_PROC_STAGE_PATH:-}"
-remote_img_glob="${FIRESIM_MONITOR_REMOTE_IMG_GLOB:-/home/ubuntu/sim_slot_0/*rerocc-lc-linux-coupleddma-bertmini-pipeline-runtime-batch8.img}"
+guest_runner_proc_stage_path="${FIRESIM_MONITOR_GUEST_RUNNER_PROC_STAGE_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.runner-proc.stage}"
+guest_checkpoint_log_path="${FIRESIM_MONITOR_GUEST_CHECKPOINT_LOG_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.checkpoint.log}"
+guest_trigger_log_path="${FIRESIM_MONITOR_GUEST_TRIGGER_LOG_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.trigger.log}"
+guest_breadcrumb_path="${FIRESIM_MONITOR_GUEST_BREADCRUMB_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.breadcrumb.bin}"
+remote_img_glob="${FIRESIM_MONITOR_REMOTE_IMG_GLOB:-/home/ubuntu/sim_slot_0/*rerocc-lc-linux-coupleddma-bertmini-pipeline-runtime-batch8*.img}"
 arm_marker_b64="$(printf '%s' "${arm_marker}" | base64 -w0)"
 complete_regex_b64="$(printf '%s' "${complete_regex}" | base64 -w0)"
 guest_log_path_b64="$(printf '%s' "${guest_log_path}" | base64 -w0)"
@@ -39,6 +42,9 @@ guest_runner_post_stage_path_b64="$(printf '%s' "${guest_runner_post_stage_path}
 guest_runner_early_stage_path_b64="$(printf '%s' "${guest_runner_early_stage_path}" | base64 -w0)"
 guest_binary_stage_path_b64="$(printf '%s' "${guest_binary_stage_path}" | base64 -w0)"
 guest_runner_proc_stage_path_b64="$(printf '%s' "${guest_runner_proc_stage_path}" | base64 -w0)"
+guest_checkpoint_log_path_b64="$(printf '%s' "${guest_checkpoint_log_path}" | base64 -w0)"
+guest_trigger_log_path_b64="$(printf '%s' "${guest_trigger_log_path}" | base64 -w0)"
+guest_breadcrumb_path_b64="$(printf '%s' "${guest_breadcrumb_path}" | base64 -w0)"
 remote_img_glob_b64="$(printf '%s' "${remote_img_glob}" | base64 -w0)"
 
 mkdir -p "${capture_dir}" "${state_dir}"
@@ -135,6 +141,21 @@ capture_remote_state() {
     run_ssh_capture "ubuntu@${private_ip}" \
       "sudo debugfs -R \"cat ${guest_sparse_log_path}\" \"${remote_img}\" 2>/dev/null || true" \
       > "${prefix}.guest-sparse-log.txt" || true
+    if [[ -n "${guest_checkpoint_log_path}" ]]; then
+      run_ssh_capture "ubuntu@${private_ip}" \
+        "sudo debugfs -R \"cat ${guest_checkpoint_log_path}\" \"${remote_img}\" 2>/dev/null || true" \
+        > "${prefix}.guest-checkpoint-log.txt" || true
+    fi
+    if [[ -n "${guest_trigger_log_path}" ]]; then
+      run_ssh_capture "ubuntu@${private_ip}" \
+        "sudo debugfs -R \"cat ${guest_trigger_log_path}\" \"${remote_img}\" 2>/dev/null || true" \
+        > "${prefix}.guest-trigger-log.txt" || true
+    fi
+    if [[ -n "${guest_breadcrumb_path}" ]]; then
+      run_ssh_capture "ubuntu@${private_ip}" \
+        "sudo debugfs -R \"cat ${guest_breadcrumb_path}\" \"${remote_img}\" 2>/dev/null || true" \
+        > "${prefix}.guest-breadcrumb.bin" || true
+    fi
     if [[ -n "${guest_proc_stage_path}" ]]; then
       run_ssh_capture "ubuntu@${private_ip}" \
         "sudo debugfs -R \"cat ${guest_proc_stage_path}\" \"${remote_img}\" 2>/dev/null || true" \
@@ -197,6 +218,8 @@ last_guest_runner_post_stage_size=0
 last_guest_runner_early_stage_size=0
 last_guest_binary_stage_size=0
 last_guest_runner_proc_stage_size=0
+last_guest_checkpoint_log_size=0
+last_guest_trigger_log_size=0
 last_progress_epoch=0
 
 while true; do
@@ -239,6 +262,8 @@ while true; do
         GUEST_RUNNER_EARLY_STAGE_PATH_B64="${guest_runner_early_stage_path_b64}" \
         GUEST_BINARY_STAGE_PATH_B64="${guest_binary_stage_path_b64}" \
         GUEST_RUNNER_PROC_STAGE_PATH_B64="${guest_runner_proc_stage_path_b64}" \
+        GUEST_CHECKPOINT_LOG_PATH_B64="${guest_checkpoint_log_path_b64}" \
+        GUEST_TRIGGER_LOG_PATH_B64="${guest_trigger_log_path_b64}" \
         REMOTE_IMG_GLOB_B64="${remote_img_glob_b64}" \
       bash -s <<'EOF'
 arm_marker="$(printf '%s' "${ARM_MARKER_B64}" | base64 -d)"
@@ -252,6 +277,8 @@ guest_runner_post_stage_path="$(printf '%s' "${GUEST_RUNNER_POST_STAGE_PATH_B64}
 guest_runner_early_stage_path="$(printf '%s' "${GUEST_RUNNER_EARLY_STAGE_PATH_B64}" | base64 -d)"
 guest_binary_stage_path="$(printf '%s' "${GUEST_BINARY_STAGE_PATH_B64}" | base64 -d)"
 guest_runner_proc_stage_path="$(printf '%s' "${GUEST_RUNNER_PROC_STAGE_PATH_B64}" | base64 -d)"
+guest_checkpoint_log_path="$(printf '%s' "${GUEST_CHECKPOINT_LOG_PATH_B64}" | base64 -d)"
+guest_trigger_log_path="$(printf '%s' "${GUEST_TRIGGER_LOG_PATH_B64}" | base64 -d)"
 remote_img_glob="$(printf '%s' "${REMOTE_IMG_GLOB_B64}" | base64 -d)"
 uartlog=/home/ubuntu/sim_slot_0/uartlog
 heartbeat=/home/ubuntu/sim_slot_0/heartbeat.csv
@@ -268,6 +295,8 @@ guest_runner_post_stage_size=0
 guest_runner_early_stage_size=0
 guest_binary_stage_size=0
 guest_runner_proc_stage_size=0
+guest_checkpoint_log_size=0
+guest_trigger_log_size=0
 if [[ -f "${uartlog}" ]]; then
   uart_size="$(wc -c < "${uartlog}" | tr -d '[:space:]')"
   grep -Fq -- "${arm_marker}" "${uartlog}" && arm_seen=1 || true
@@ -295,6 +324,12 @@ if [[ -n "${img}" ]]; then
   if [[ -n "${guest_runner_proc_stage_path}" ]]; then
     guest_runner_proc_stage_size="$(sudo debugfs -R "cat ${guest_runner_proc_stage_path}" "${img}" 2>/dev/null | wc -c | tr -d '[:space:]' || true)"
   fi
+  if [[ -n "${guest_checkpoint_log_path}" ]]; then
+    guest_checkpoint_log_size="$(sudo debugfs -R "cat ${guest_checkpoint_log_path}" "${img}" 2>/dev/null | wc -c | tr -d '[:space:]' || true)"
+  fi
+  if [[ -n "${guest_trigger_log_path}" ]]; then
+    guest_trigger_log_size="$(sudo debugfs -R "cat ${guest_trigger_log_path}" "${img}" 2>/dev/null | wc -c | tr -d '[:space:]' || true)"
+  fi
 fi
 hb_last="$(tail -n 1 "${heartbeat}" 2>/dev/null || true)"
 printf 'UART_SIZE=%s\n' "${uart_size:-0}"
@@ -309,6 +344,8 @@ printf 'GUEST_RUNNER_POST_STAGE_SIZE=%s\n' "${guest_runner_post_stage_size:-0}"
 printf 'GUEST_RUNNER_EARLY_STAGE_SIZE=%s\n' "${guest_runner_early_stage_size:-0}"
 printf 'GUEST_BINARY_STAGE_SIZE=%s\n' "${guest_binary_stage_size:-0}"
 printf 'GUEST_RUNNER_PROC_STAGE_SIZE=%s\n' "${guest_runner_proc_stage_size:-0}"
+printf 'GUEST_CHECKPOINT_LOG_SIZE=%s\n' "${guest_checkpoint_log_size:-0}"
+printf 'GUEST_TRIGGER_LOG_SIZE=%s\n' "${guest_trigger_log_size:-0}"
 printf 'HB_LAST=%s\n' "${hb_last}"
 EOF
   )"
@@ -325,6 +362,8 @@ EOF
   guest_runner_early_stage_size="$(awk -F= '/^GUEST_RUNNER_EARLY_STAGE_SIZE=/{print $2}' <<<"${probe_output}")"
   guest_binary_stage_size="$(awk -F= '/^GUEST_BINARY_STAGE_SIZE=/{print $2}' <<<"${probe_output}")"
   guest_runner_proc_stage_size="$(awk -F= '/^GUEST_RUNNER_PROC_STAGE_SIZE=/{print $2}' <<<"${probe_output}")"
+  guest_checkpoint_log_size="$(awk -F= '/^GUEST_CHECKPOINT_LOG_SIZE=/{print $2}' <<<"${probe_output}")"
+  guest_trigger_log_size="$(awk -F= '/^GUEST_TRIGGER_LOG_SIZE=/{print $2}' <<<"${probe_output}")"
   hb_last="$(awk -F= '/^HB_LAST=/{print $2}' <<<"${probe_output}")"
 
   uart_size="${uart_size:-0}"
@@ -337,6 +376,8 @@ EOF
   guest_runner_early_stage_size="${guest_runner_early_stage_size:-0}"
   guest_binary_stage_size="${guest_binary_stage_size:-0}"
   guest_runner_proc_stage_size="${guest_runner_proc_stage_size:-0}"
+  guest_checkpoint_log_size="${guest_checkpoint_log_size:-0}"
+  guest_trigger_log_size="${guest_trigger_log_size:-0}"
 
   now_epoch="$(date +%s)"
 
@@ -358,6 +399,8 @@ EOF
     last_guest_runner_early_stage_size="${guest_runner_early_stage_size}"
     last_guest_binary_stage_size="${guest_binary_stage_size}"
     last_guest_runner_proc_stage_size="${guest_runner_proc_stage_size}"
+    last_guest_checkpoint_log_size="${guest_checkpoint_log_size}"
+    last_guest_trigger_log_size="${guest_trigger_log_size}"
     echo "[prt-host-watchdog] arm marker observed at $(date -u +%Y-%m-%dT%H:%M:%SZ) hb='${hb_last}'"
     sleep "${poll_seconds}"
     continue
@@ -376,6 +419,8 @@ EOF
     last_guest_runner_early_stage_size="${guest_runner_early_stage_size}"
     last_guest_binary_stage_size="${guest_binary_stage_size}"
     last_guest_runner_proc_stage_size="${guest_runner_proc_stage_size}"
+    last_guest_checkpoint_log_size="${guest_checkpoint_log_size}"
+    last_guest_trigger_log_size="${guest_trigger_log_size}"
     echo "[prt-host-watchdog] guest-status arm observed at $(date -u +%Y-%m-%dT%H:%M:%SZ) hb='${hb_last}' guest_status=${guest_status_size}"
     sleep "${poll_seconds}"
     continue
@@ -419,6 +464,14 @@ EOF
     progressed=1
     last_guest_binary_stage_size="${guest_binary_stage_size}"
   fi
+  if (( guest_checkpoint_log_size > last_guest_checkpoint_log_size )); then
+    progressed=1
+    last_guest_checkpoint_log_size="${guest_checkpoint_log_size}"
+  fi
+  if (( guest_trigger_log_size > last_guest_trigger_log_size )); then
+    progressed=1
+    last_guest_trigger_log_size="${guest_trigger_log_size}"
+  fi
   # Proc snapshots are diagnostic by design and may keep growing while the
   # workload is otherwise hung, so do not treat them as forward progress.
   last_guest_proc_stage_size="${guest_proc_stage_size}"
@@ -426,11 +479,11 @@ EOF
 
   if (( progressed == 1 )); then
     last_progress_epoch="${now_epoch}"
-    echo "[prt-host-watchdog] progress hb='${hb_last}' uart=${uart_size} guest_log=${guest_log_size} guest_sparse=${guest_sparse_log_size} guest_status=${guest_status_size} guest_proc=${guest_proc_stage_size} guest_runner=${guest_runner_stage_size} guest_runner_post=${guest_runner_post_stage_size} guest_runner_early=${guest_runner_early_stage_size} guest_binary=${guest_binary_stage_size} guest_runner_proc=${guest_runner_proc_stage_size}"
+    echo "[prt-host-watchdog] progress hb='${hb_last}' uart=${uart_size} guest_log=${guest_log_size} guest_sparse=${guest_sparse_log_size} guest_checkpoint=${guest_checkpoint_log_size} guest_trigger=${guest_trigger_log_size} guest_status=${guest_status_size} guest_proc=${guest_proc_stage_size} guest_runner=${guest_runner_stage_size} guest_runner_post=${guest_runner_post_stage_size} guest_runner_early=${guest_runner_early_stage_size} guest_binary=${guest_binary_stage_size} guest_runner_proc=${guest_runner_proc_stage_size}"
   fi
 
   idle_seconds=$((now_epoch - last_progress_epoch))
-  echo "[prt-host-watchdog] hb='${hb_last}' idle=${idle_seconds}s uart=${uart_size} guest_log=${guest_log_size} guest_sparse=${guest_sparse_log_size} guest_status=${guest_status_size} guest_proc=${guest_proc_stage_size} guest_runner=${guest_runner_stage_size} guest_runner_post=${guest_runner_post_stage_size} guest_runner_early=${guest_runner_early_stage_size} guest_binary=${guest_binary_stage_size} guest_runner_proc=${guest_runner_proc_stage_size}"
+  echo "[prt-host-watchdog] hb='${hb_last}' idle=${idle_seconds}s uart=${uart_size} guest_log=${guest_log_size} guest_sparse=${guest_sparse_log_size} guest_checkpoint=${guest_checkpoint_log_size} guest_trigger=${guest_trigger_log_size} guest_status=${guest_status_size} guest_proc=${guest_proc_stage_size} guest_runner=${guest_runner_stage_size} guest_runner_post=${guest_runner_post_stage_size} guest_runner_early=${guest_runner_early_stage_size} guest_binary=${guest_binary_stage_size} guest_runner_proc=${guest_runner_proc_stage_size}"
 
   if (( idle_seconds >= idle_timeout_seconds )); then
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
