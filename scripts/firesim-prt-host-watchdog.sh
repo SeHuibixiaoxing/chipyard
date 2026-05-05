@@ -11,10 +11,12 @@ ssh_key="${FIRESIM_MONITOR_SSH_KEY:-/home/ubuntu/firesim.pem}"
 capture_dir="${FIRESIM_MONITOR_CAPTURE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tmp/firesim-aws-f2/captures}"
 state_dir="${FIRESIM_MONITOR_STATE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tmp/firesim-aws-f2/tmux}"
 idle_timeout_seconds="${FIRESIM_RUNWORKLOAD_IDLE_TIMEOUT_SECONDS:-600}"
+live_idle_timeout_seconds="${FIRESIM_RUNWORKLOAD_LIVE_IDLE_TIMEOUT_SECONDS:-10800}"
 poll_seconds="${FIRESIM_RUNWORKLOAD_MONITOR_POLL_SECONDS:-30}"
 ssh_connect_timeout_seconds="${FIRESIM_MONITOR_SSH_CONNECT_TIMEOUT_SECONDS:-10}"
 probe_timeout_seconds="${FIRESIM_MONITOR_PROBE_TIMEOUT_SECONDS:-20}"
 capture_timeout_seconds="${FIRESIM_MONITOR_CAPTURE_TIMEOUT_SECONDS:-180}"
+heartbeat_liveness_enable="${FIRESIM_MONITOR_HEARTBEAT_LIVENESS_ENABLE:-1}"
 arm_marker="${FIRESIM_MONITOR_ARM_MARKER:-[firemarshal] watchdog armed at wrapper launch}"
 arm_on_guest_status_nonzero="${FIRESIM_MONITOR_ARM_ON_GUEST_STATUS_NONZERO:-1}"
 complete_regex="${FIRESIM_MONITOR_COMPLETE_REGEX:-BERTMINI_PIPELINE_RUNTIME_PASS|BERTMINI_PIPELINE_RUNTIME_FAIL|\\[firemarshal\\] pipeline-runtime exited|\\[firemarshal\\] powering off guest}"
@@ -31,6 +33,8 @@ guest_checkpoint_log_path="${FIRESIM_MONITOR_GUEST_CHECKPOINT_LOG_PATH:-/root/pi
 guest_trigger_log_path="${FIRESIM_MONITOR_GUEST_TRIGGER_LOG_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.trigger.log}"
 guest_breadcrumb_path="${FIRESIM_MONITOR_GUEST_BREADCRUMB_PATH:-/root/pipeline-runtime-debug/bertmini-batch8.breadcrumb.bin}"
 remote_img_glob="${FIRESIM_MONITOR_REMOTE_IMG_GLOB:-/home/ubuntu/sim_slot_0/*rerocc-lc-linux-coupleddma-bertmini-pipeline-runtime-batch8*.img}"
+trace_glob="${FIRESIM_MONITOR_TRACE_GLOB:-/home/ubuntu/sim_slot_0/TRACEFILE-C*}"
+trace_tail_lines="${FIRESIM_MONITOR_TRACE_TAIL_LINES:-4000}"
 arm_marker_b64="$(printf '%s' "${arm_marker}" | base64 -w0)"
 complete_regex_b64="$(printf '%s' "${complete_regex}" | base64 -w0)"
 guest_log_path_b64="$(printf '%s' "${guest_log_path}" | base64 -w0)"
@@ -74,8 +78,9 @@ run_ssh_capture() {
 
 echo "[prt-host-watchdog] started at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 echo "[prt-host-watchdog] runtime_config=${runtime_config}"
-echo "[prt-host-watchdog] idle_timeout_seconds=${idle_timeout_seconds} poll_seconds=${poll_seconds}"
+echo "[prt-host-watchdog] idle_timeout_seconds=${idle_timeout_seconds} live_idle_timeout_seconds=${live_idle_timeout_seconds} poll_seconds=${poll_seconds}"
 echo "[prt-host-watchdog] ssh_connect_timeout_seconds=${ssh_connect_timeout_seconds} probe_timeout_seconds=${probe_timeout_seconds} capture_timeout_seconds=${capture_timeout_seconds}"
+echo "[prt-host-watchdog] heartbeat_liveness_enable=${heartbeat_liveness_enable}"
 echo "[prt-host-watchdog] arm_on_guest_status_nonzero=${arm_on_guest_status_nonzero}"
 
 deploy_dir="$(cd "$(dirname "${runtime_config}")" && pwd)"
@@ -117,10 +122,24 @@ capture_remote_state() {
   local stamp="$2"
   local prefix="${capture_dir}/${session_name}-${private_ip}-host-watchdog-${stamp}"
   local remote_img
+  local firesim_pid
+  local remote_traces
+  local trace_path
+  local trace_name
 
   remote_img="$(
     run_ssh_capture "ubuntu@${private_ip}" \
       "ls ${remote_img_glob} 2>/dev/null | head -n 1" \
+      2>/dev/null || true
+  )"
+  firesim_pid="$(
+    run_ssh_capture "ubuntu@${private_ip}" \
+      'pgrep -o FireSim-f2 2>/dev/null || true' \
+      2>/dev/null || true
+  )"
+  remote_traces="$(
+    run_ssh_capture "ubuntu@${private_ip}" \
+      "sudo sh -lc 'ls ${trace_glob} 2>/dev/null || true'" \
       2>/dev/null || true
   )"
 
@@ -130,6 +149,24 @@ capture_remote_state() {
   run_ssh_capture "ubuntu@${private_ip}" \
     'cat /home/ubuntu/sim_slot_0/heartbeat.csv 2>/dev/null || true' \
     > "${prefix}.heartbeat.csv" || true
+  if [[ -n "${firesim_pid}" ]]; then
+    run_ssh_capture "ubuntu@${private_ip}" \
+      "sudo tr '\0' '\n' </proc/${firesim_pid}/cmdline 2>/dev/null || true" \
+      > "${prefix}.firesim-cmdline.txt" || true
+    run_ssh_capture "ubuntu@${private_ip}" \
+      "sudo find /proc/${firesim_pid}/fd -maxdepth 1 -type l -lname '/home/ubuntu/sim_slot_0/TRACEFILE-C*' -printf '%f -> %l\n' 2>/dev/null || true" \
+      > "${prefix}.trace-fds.txt" || true
+  fi
+  run_ssh_capture "ubuntu@${private_ip}" \
+    "sudo sh -lc 'ls -l ${trace_glob} 2>/dev/null || true; wc -c ${trace_glob} 2>/dev/null || true'" \
+    > "${prefix}.trace-files.txt" || true
+  while IFS= read -r trace_path; do
+    [[ -n "${trace_path}" ]] || continue
+    trace_name="$(basename "${trace_path}")"
+    run_ssh_capture "ubuntu@${private_ip}" \
+      "sudo tail -n ${trace_tail_lines} \"${trace_path}\" 2>/dev/null || sudo cat \"${trace_path}\" 2>/dev/null || true" \
+      > "${prefix}.${trace_name}.tail.txt" || true
+  done <<<"${remote_traces}"
 
   if [[ -n "${remote_img}" ]]; then
     run_ssh_capture "ubuntu@${private_ip}" \
@@ -220,6 +257,8 @@ last_guest_binary_stage_size=0
 last_guest_runner_proc_stage_size=0
 last_guest_checkpoint_log_size=0
 last_guest_trigger_log_size=0
+last_hb_line=""
+last_heartbeat_epoch=0
 last_progress_epoch=0
 
 while true; do
@@ -401,6 +440,12 @@ EOF
     last_guest_runner_proc_stage_size="${guest_runner_proc_stage_size}"
     last_guest_checkpoint_log_size="${guest_checkpoint_log_size}"
     last_guest_trigger_log_size="${guest_trigger_log_size}"
+    last_hb_line="${hb_last}"
+    if [[ -n "${hb_last}" ]]; then
+      last_heartbeat_epoch="${now_epoch}"
+    else
+      last_heartbeat_epoch=0
+    fi
     echo "[prt-host-watchdog] arm marker observed at $(date -u +%Y-%m-%dT%H:%M:%SZ) hb='${hb_last}'"
     sleep "${poll_seconds}"
     continue
@@ -421,6 +466,12 @@ EOF
     last_guest_runner_proc_stage_size="${guest_runner_proc_stage_size}"
     last_guest_checkpoint_log_size="${guest_checkpoint_log_size}"
     last_guest_trigger_log_size="${guest_trigger_log_size}"
+    last_hb_line="${hb_last}"
+    if [[ -n "${hb_last}" ]]; then
+      last_heartbeat_epoch="${now_epoch}"
+    else
+      last_heartbeat_epoch=0
+    fi
     echo "[prt-host-watchdog] guest-status arm observed at $(date -u +%Y-%m-%dT%H:%M:%SZ) hb='${hb_last}' guest_status=${guest_status_size}"
     sleep "${poll_seconds}"
     continue
@@ -429,6 +480,18 @@ EOF
   if [[ "${armed}" == "0" ]]; then
     sleep "${poll_seconds}"
     continue
+  fi
+
+  heartbeat_progressed=0
+  if [[ "${heartbeat_liveness_enable}" == "1" && -n "${hb_last}" ]]; then
+    if [[ "${hb_last}" != "${last_hb_line}" ]]; then
+      heartbeat_progressed=1
+      last_hb_line="${hb_last}"
+      last_heartbeat_epoch="${now_epoch}"
+    elif (( last_heartbeat_epoch == 0 )); then
+      last_hb_line="${hb_last}"
+      last_heartbeat_epoch="${now_epoch}"
+    fi
   fi
 
   progressed=0
@@ -483,11 +546,32 @@ EOF
   fi
 
   idle_seconds=$((now_epoch - last_progress_epoch))
-  echo "[prt-host-watchdog] hb='${hb_last}' idle=${idle_seconds}s uart=${uart_size} guest_log=${guest_log_size} guest_sparse=${guest_sparse_log_size} guest_checkpoint=${guest_checkpoint_log_size} guest_trigger=${guest_trigger_log_size} guest_status=${guest_status_size} guest_proc=${guest_proc_stage_size} guest_runner=${guest_runner_stage_size} guest_runner_post=${guest_runner_post_stage_size} guest_runner_early=${guest_runner_early_stage_size} guest_binary=${guest_binary_stage_size} guest_runner_proc=${guest_runner_proc_stage_size}"
+  heartbeat_idle_seconds="${idle_seconds}"
+  if [[ "${heartbeat_liveness_enable}" == "1" ]] && (( last_heartbeat_epoch > 0 )); then
+    heartbeat_idle_seconds=$((now_epoch - last_heartbeat_epoch))
+  fi
+  if (( heartbeat_progressed == 1 )) && (( progressed == 0 )); then
+    echo "[prt-host-watchdog] heartbeat-progress hb='${hb_last}' idle=${idle_seconds}s hb_idle=${heartbeat_idle_seconds}s uart=${uart_size} guest_log=${guest_log_size} guest_sparse=${guest_sparse_log_size} guest_status=${guest_status_size}"
+  fi
+  echo "[prt-host-watchdog] hb='${hb_last}' idle=${idle_seconds}s hb_idle=${heartbeat_idle_seconds}s uart=${uart_size} guest_log=${guest_log_size} guest_sparse=${guest_sparse_log_size} guest_checkpoint=${guest_checkpoint_log_size} guest_trigger=${guest_trigger_log_size} guest_status=${guest_status_size} guest_proc=${guest_proc_stage_size} guest_runner=${guest_runner_stage_size} guest_runner_post=${guest_runner_post_stage_size} guest_runner_early=${guest_runner_early_stage_size} guest_binary=${guest_binary_stage_size} guest_runner_proc=${guest_runner_proc_stage_size}"
 
   if (( idle_seconds >= idle_timeout_seconds )); then
+    heartbeat_alive=0
+    if [[ "${heartbeat_liveness_enable}" == "1" && "${live_idle_timeout_seconds}" != "0" ]] && (( last_heartbeat_epoch > 0 )) && (( heartbeat_idle_seconds < idle_timeout_seconds )) && (( idle_seconds < live_idle_timeout_seconds )); then
+      heartbeat_alive=1
+    fi
+    if (( heartbeat_alive == 0 )); then
+      stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+      echo "[prt-host-watchdog] host idle timeout reached after ${idle_seconds}s (hb_idle=${heartbeat_idle_seconds}s)"
+      capture_remote_state "${private_ip}" "${stamp}"
+      terminate_runfarm
+      exit 124
+    fi
+  fi
+
+  if [[ "${heartbeat_liveness_enable}" == "1" && "${live_idle_timeout_seconds}" != "0" ]] && (( idle_seconds >= live_idle_timeout_seconds )); then
     stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-    echo "[prt-host-watchdog] host idle timeout reached after ${idle_seconds}s"
+    echo "[prt-host-watchdog] host live-idle timeout reached after ${idle_seconds}s while heartbeat remained active (hb_idle=${heartbeat_idle_seconds}s)"
     capture_remote_state "${private_ip}" "${stamp}"
     terminate_runfarm
     exit 124

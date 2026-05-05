@@ -215,6 +215,20 @@ class FireSimRocketConfig extends Config(
   new chipyard.RocketConfig)
 // DOC include end: firesimconfig
 
+class FireSimRocketNICNoTraceConfig extends Config(
+  new WithNIC ++
+  new chipyard.config.WithNoTraceIO ++
+  new WithDefaultFireSimBridges ++
+  new WithFireSimHighPerfConfigTweaks ++
+  new chipyard.RocketConfig)
+
+class FireSimRocketNICNoTraceObsConfig extends Config(
+  new FireSimRocketNICNoTraceConfig)
+
+class FireSimRocketNICNoTrace8BPConfig extends Config(
+  new freechips.rocketchip.rocket.WithNBreakpoints(8) ++
+  new FireSimRocketNICNoTraceConfig)
+
 class FireSimRocket1GiBDRAMConfig extends Config(
   new freechips.rocketchip.subsystem.WithExtMemSize((1 << 30) * 1L) ++
   new FireSimRocketConfig)

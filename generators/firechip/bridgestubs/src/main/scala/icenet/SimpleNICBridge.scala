@@ -11,10 +11,22 @@ import firesim.lib.bridgeutils._
 
 import firechip.bridgeinterfaces._
 
-class NICBridge(implicit p: Parameters) extends BlackBox with Bridge[HostPortIO[NICBridgeTargetIO]] {
+class NICBridgeHostIO(private val targetIO: NICBridgeTargetIO = new NICBridgeTargetIO)
+    extends Bundle
+    with ChannelizedHostPortIO {
+  def targetClockRef = targetIO.clock
+
+  val nicOut = InputChannel(targetIO.nic.out)
+  val nicIn  = OutputChannel(targetIO.nic.in)
+  val macAddr = OutputChannel(targetIO.nic.macAddr)
+  val rlimit = OutputChannel(targetIO.nic.rlimit)
+  val pauser = OutputChannel(targetIO.nic.pauser)
+}
+
+class NICBridge(implicit p: Parameters) extends BlackBox with Bridge[NICBridgeHostIO] {
   val moduleName = "firechip.goldengateimplementations.SimpleNICBridgeModule"
   val io = IO(new NICBridgeTargetIO)
-  val bridgeIO = HostPort(io)
+  val bridgeIO = new NICBridgeHostIO(io)
   val constructorArg = None
   generateAnnotations()
 }

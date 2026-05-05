@@ -33,6 +33,7 @@ tracerv_t::tracerv_t(simif_t &sim,
                      unsigned int max_core_ipc,
                      const ClockInfo &clock_info)
     : streaming_bridge_driver_t(sim, stream, &KIND), mmio_addrs(mmio_addrs),
+      tracerno(tracerno),
       stream_idx(stream_idx), stream_depth(stream_depth),
       max_core_ipc(max_core_ipc), clock_info(clock_info) {
   const char *tracefilename = nullptr;
@@ -57,6 +58,9 @@ tracerv_t::tracerv_t(simif_t &sim,
   const std::string humanreadable_arg = "+trace-humanreadable";
   const std::string trace_output_format_arg = "+trace-output-format=";
   const std::string dwarf_file_arg = "+dwarf-file-name=";
+  const std::string trace_min_batch_arg = "+trace-min-batch=";
+
+  this->tick_min_batch_beats = stream_depth;
 
   for (auto &arg : args) {
     if (arg.find(tracefile_arg) == 0) {
@@ -101,6 +105,14 @@ tracerv_t::tracerv_t(simif_t &sim,
           const_cast<char *>(arg.c_str()) + dwarf_file_arg.length();
       this->dwarf_file_name = std::string(dwarf_file_name);
     }
+    if (arg.find(trace_min_batch_arg) == 0) {
+      char *str = const_cast<char *>(arg.c_str()) + trace_min_batch_arg.length();
+      this->tick_min_batch_beats = strtoul(str, NULL, 10);
+    }
+  }
+
+  if (this->tick_min_batch_beats > (unsigned)stream_depth) {
+    this->tick_min_batch_beats = stream_depth;
   }
 
   if (tracefilename) {
@@ -205,6 +217,9 @@ void tracerv_t::init() {
            0ul,
            ULONG_MAX);
   }
+  printf("TracerV: Host pull minimum batch is %u beats (stream depth %d)\n",
+         this->tick_min_batch_beats,
+         this->stream_depth);
   write(mmio_addrs.initDone, true);
 }
 
@@ -215,6 +230,23 @@ size_t tracerv_t::process_tokens(int num_beats, int minimum_batch_beats) {
   page_aligned_sized_array(OUTBUF, this->stream_depth * STREAM_WIDTH_BYTES);
   auto bytes_received =
       pull(this->stream_idx, OUTBUF, maximum_batch_bytes, minimum_batch_bytes);
+  bool flush_after_serialize = false;
+  if (bytes_received > 0) {
+    total_pulled_bytes += bytes_received;
+    total_nonzero_pulls++;
+    if (!reported_first_nonzero_pull) {
+      fprintf(stderr,
+              "TracerV[%d]: first nonzero host pull bytes=%zu selector=%u min_batch_beats=%u tracefile=%s\n",
+              tracerno,
+              bytes_received,
+              trigger_selector,
+              tick_min_batch_beats,
+              tracefilename.c_str());
+      fflush(stderr);
+      reported_first_nonzero_pull = true;
+      flush_after_serialize = true;
+    }
+  }
   // check that a tracefile exists (one is enough) since the manager
   // does not create a tracefile when trace_enable is disabled, but the
   // TracerV bridge still exists, and no tracefile is created by default.
@@ -235,6 +267,9 @@ size_t tracerv_t::process_tokens(int num_beats, int minimum_batch_beats) {
               human_readable,
               test_output,
               fireperf);
+    if (flush_after_serialize) {
+      fflush(tracefile);
+    }
   }
   return bytes_received;
 }
@@ -308,7 +343,7 @@ void tracerv_t::write_header(FILE *file) {
 
 void tracerv_t::tick() {
   if (this->trace_enabled) {
-    process_tokens(this->stream_depth, this->stream_depth);
+    process_tokens(this->stream_depth, this->tick_min_batch_beats);
   }
 }
 
@@ -317,4 +352,10 @@ void tracerv_t::flush() {
   pull_flush(stream_idx);
   while (this->trace_enabled && (process_tokens(this->stream_depth, 0) > 0))
     ;
+  fprintf(stderr,
+          "TracerV[%d]: flush summary nonzero_pulls=%" PRIu64 " total_bytes=%" PRIu64 "\n",
+          tracerno,
+          total_nonzero_pulls,
+          total_pulled_bytes);
+  fflush(stderr);
 }

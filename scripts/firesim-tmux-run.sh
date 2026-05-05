@@ -23,6 +23,10 @@ Environment:
   FIRESIM_RUNWORKLOAD_WATCHDOG_SECONDS   Override the default 10800s watchdog for
                                          `runworkload`
   FIRESIM_RUNWORKLOAD_WATCHDOG_DISABLE=1 Disable the `runworkload` watchdog
+  FIRESIM_RUNWORKLOAD_LIVE_IDLE_TIMEOUT_SECONDS
+                                         Override the extended host-monitor
+                                         timeout used when heartbeat stays live
+                                         but guest-visible files stop growing
   FIRESIM_RUNWORKLOAD_MONITOR_SCRIPT     Optional host-side monitor script to
                                          launch alongside `runworkload`
 EOF
@@ -169,7 +173,23 @@ if [[ "${task_name}" == "runworkload" && -n "${FIRESIM_RUNWORKLOAD_MONITOR_SCRIP
 fi
 
 while IFS='=' read -r env_name _; do
-  if [[ "${env_name}" =~ ^FIRESIM_[A-Za-z0-9_]+$ ]]; then
+  if [[ "${env_name}" =~ ^FIRESIM_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^PIPELINE_RUNTIME_DEBUG_TRIGGER_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^PIPELINE_RUNTIME_DEBUG_FILTER_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^PIPELINE_RUNTIME_LOCAL_GDB_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^PIPELINE_RUNTIME_DMA_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^PIPELINE_RUNTIME_BREADCRUMB_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^REROCC_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^DMA_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^COVERAGE_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^NONBLOCKING_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^NUM_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^GEMMINI_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^LOCAL_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^PAIR_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^LONG_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^SHORT_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" == "BYTES" ]]; then
     propagated_env_names+=("${env_name}")
   fi
 done < <(env | sort)

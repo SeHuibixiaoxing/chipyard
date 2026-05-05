@@ -37,6 +37,7 @@ tsibridge_t::tsibridge_t(simif_t &simif,
   // This particular selection is correlated to the amount of reset cycles.
   // It should be larger than the reset period.
   wait_ticks = 8;
+  skip_tick_debug = false;
 
   // This particular selection is vestigial. You may change it freely.
   // This * wait_ticks is should be larger than the reset period.
@@ -51,6 +52,9 @@ tsibridge_t::tsibridge_t(simif_t &simif,
     }
     if (arg.find("+fesvr-wait-ticks=") == 0) {
       wait_ticks = atoi(arg.c_str() + 18);
+    }
+    if (arg.find("+fesvr-skip-tick-debug") == 0) {
+      skip_tick_debug = true;
     }
     if (arg.find(prog_arg) == 0) {
       std::string clean_target_args =
@@ -198,7 +202,9 @@ void tsibridge_t::tick() {
     return;
   if (wait_ticks != 0) {
     wait_ticks -= 1;
-    printf("tsibridge_t::tick skipping tick\n");
+    if (skip_tick_debug) {
+      printf("tsibridge_t::tick skipping tick\n");
+    }
     go();
     return;
   }

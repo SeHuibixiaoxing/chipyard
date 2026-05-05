@@ -21,7 +21,7 @@ The manager implements shadow copies of critical core architectural state, inclu
 ReRoCC adds new user-level CSRs to the host CPU, which manage the availability of physical accelerators for the CPU thread.
 
 The ``rrcfg`` registers track an "acquired" accelerator available for the hart to access.
-Implementations may support up to 16 ``rrcfg`` registers.
+Implementations may support up to 32 ``rrcfg`` registers.
 Each ``rrcfg`` register contains a ``mgr`` field, which can be set to the physical ID of a remote RoCC accelerator manager, and a ``acq`` field, which, if set, indicates that the accelerator is available to access.
 
 The ``rropc`` registers assign ``rrcfg`` registers to the four available RoCC custom opcodes.
@@ -34,11 +34,12 @@ The ``rrbar`` register is currently used to assist in fencing accelerator memory
 | 0x800-0x803 | ``rropc0-rropc3 `` |
 | 0x804       | ``rrbar         `` |
 | 0x810-0x81f | ``rrcfg0-rrcfg15`` |
+| 0x820-0x82f | ``rrcfg16-rrcfg31`` |
 
 | ReRoCC CSR Field | Description                                                                                                                                                     |
 |------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| ``rropcX[3:0]``  | Index of ``rrcfg`` opcode ``customX`` is mapped to                                                                                                              |
-| ``rrbar[3:0]``   | When written, indicates that the next memory fence should apply to accelerator managed by the indexed ``rrcfg``                                                 |
+| ``rropcX[4:0]``  | Index of ``rrcfg`` opcode ``customX`` is mapped to                                                                                                              |
+| ``rrbar[4:0]``   | When written, indicates that the next memory fence should apply to accelerator managed by the indexed ``rrcfg``                                                 |
 | ``rrcfgX[7:0]``  | Index of physical accelerator this register is mapped to                                                                                                        |
 | ``rrcfgX[8]``    | If set, indicates this register should attempt to "acquire" the corresponding physical accelerator. Reading this bit returns whether acquisition was successful |
 

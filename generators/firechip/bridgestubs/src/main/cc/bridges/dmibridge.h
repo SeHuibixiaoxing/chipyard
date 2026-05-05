@@ -60,6 +60,7 @@ private:
   // Delay n ticks to avoid race-condition where target reset resets the bridge
   // state and drops xacts
   uint32_t wait_ticks;
+  bool skip_tick_debug;
 
   // Arguments passed to firesim_dtm.
   char **dmi_argv = nullptr;

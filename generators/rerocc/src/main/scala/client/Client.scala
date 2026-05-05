@@ -12,10 +12,10 @@ import rerocc.bus._
 import rerocc.manager.{ReRoCCIBufEntriesKey}
 
 case class ReRoCCClientParams(
-  nCfgs: Int = 16,
+  nCfgs: Int = ReRoCCCSRs.MAX_CFGS,
   tileId: Int = 0
 ) {
-  require(nCfgs <= 16)
+  require(nCfgs <= ReRoCCCSRs.MAX_CFGS)
   def customCSRs = ReRoCCCSRs.customCSRs(nCfgs)
 }
 
@@ -83,6 +83,12 @@ class ReRoCCClient(_params: ReRoCCClientParams = ReRoCCClientParams())(implicit 
     val csr_bar_io = io.csrs(4)
     val csr_cfg_io = io.csrs.drop(5)
 
+    io.csrs.foreach { csr =>
+      csr.stall := false.B
+      csr.set := false.B
+      csr.sdata := 0.U
+    }
+
     val csr_opc = Reg(Vec(4, UInt(log2Ceil(nCfgs).W)))
     val csr_opc_next = WireInit(csr_opc)
     val csr_cfg = RegInit(VecInit.fill(nCfgs) { 0.U.asTypeOf(new ReRoCCCfg) })
@@ -107,8 +113,8 @@ class ReRoCCClient(_params: ReRoCCClientParams = ReRoCCClientParams())(implicit 
 
     val s_idle :: s_acq :: s_acq_ack :: s_rel :: s_rel_ack :: s_status0 :: s_status1 :: s_ptbr :: Nil = Enum(8)
     val cfg_acq_state = RegInit(s_idle)
-    val cfg_acq_id = Reg(UInt())
-    val cfg_acq_mgr_id = Reg(UInt())
+    val cfg_acq_id = Reg(UInt(log2Ceil(nCfgs).W))
+    val cfg_acq_mgr_id = Reg(UInt(edge.bundle.managerIdBits.W))
 
     for (i <- 0 until nCfgs) { csr_cfg_io(i).stall := cfg_acq_state =/= s_idle }
 

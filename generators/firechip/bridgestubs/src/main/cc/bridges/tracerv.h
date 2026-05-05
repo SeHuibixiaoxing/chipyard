@@ -60,6 +60,7 @@ public:
 
 private:
   const TRACERVBRIDGEMODULE_struct mmio_addrs;
+  const int tracerno;
   const int stream_idx;
   const int stream_depth;
 
@@ -97,6 +98,10 @@ private:
   std::string tracefilename;
   std::string dwarf_file_name;
   bool fireperf = false;
+  unsigned tick_min_batch_beats = 0;
+  bool reported_first_nonzero_pull = false;
+  uint64_t total_pulled_bytes = 0;
+  uint64_t total_nonzero_pulls = 0;
 
   size_t process_tokens(int num_beats, int minium_batch_beats);
   int beats_available_stable();
