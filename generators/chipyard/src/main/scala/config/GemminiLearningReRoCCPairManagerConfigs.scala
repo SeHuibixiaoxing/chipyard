@@ -324,6 +324,31 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P8x4x2CoupledDMAPairManagerDu
     pairAtlMaxInFlight = Some(64)
   )
 
+class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P8x4x2CoupledDMAPairManagerDummy16x16Sbus128
+  extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
+    numCores = 4,
+    cpuX = 2,
+    cpuY = 2,
+    numPairs = 8,
+    pairX = 4,
+    pairY = 2,
+    sbusWidthBits = 16 * 8,
+    nMemoryChannels = 2,
+    freqMHz = 1000.0,
+    meshRows = 16,
+    meshColumns = 16,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4,
+    pairTlMaxInFlight = Some(64),
+    pairAtlMaxInFlight = Some(64)
+  )
+
 class GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P12x4x3CoupledDMAPairManagerDummy16x16Sbus256
   extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
     numCores = 4,
