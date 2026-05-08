@@ -35,6 +35,7 @@ Match the touched subtree. Scala/Chisel generally uses 2-space indentation, `Pas
 ## Testing Guidelines
 Prefer FireSim-managed regressions over backend-specific one-offs. For FPGA runs, keep evidence in `deploy/results-workload/`. For Verilator runs, use FireSim metasimulation.
 After every key test milestone, commit the tested state with git before starting the next debugging step. The commit message must be detailed enough to reconstruct what was tested, including the AGFI/AFI or simulator target, runtime/build configs, workload, commands or scripts used, pass/fail result, artifact locations, and any known limitations. Do not bundle unrelated dirty work into these checkpoint commits.
+For pipeline-runtime DMA completion, `doneflag` is a known-bad completion signal. Do not use or reintroduce doneflag polling as the completion path, fallback path, or pass/fail evidence. Use `hw_dma_fence()` / blocking wait as the completion authority; doneflag may only be auxiliary telemetry, and runs that rely on doneflag polling are invalid DMA-completion evidence.
 
 ## Branch & Pull Request Guidelines
 Use `npu/dev` as the main development branch and PR base unless told otherwise. Branch creation, switching, and commits are handled outside this guide. When preparing a PR, follow the repository template and include the required changelog label, related issues, and relevant docs/tests.
