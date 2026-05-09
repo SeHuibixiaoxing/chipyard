@@ -178,6 +178,7 @@ while IFS='=' read -r env_name _; do
      [[ "${env_name}" =~ ^PIPELINE_RUNTIME_DEBUG_FILTER_[A-Za-z0-9_]+$ ]] || \
      [[ "${env_name}" =~ ^PIPELINE_RUNTIME_LOCAL_GDB_[A-Za-z0-9_]+$ ]] || \
      [[ "${env_name}" =~ ^PIPELINE_RUNTIME_DMA_[A-Za-z0-9_]+$ ]] || \
+     [[ "${env_name}" =~ ^PIPELINE_RUNTIME_NO_DMA_[A-Za-z0-9_]+$ ]] || \
      [[ "${env_name}" =~ ^PIPELINE_RUNTIME_BREADCRUMB_[A-Za-z0-9_]+$ ]] || \
      [[ "${env_name}" =~ ^REROCC_[A-Za-z0-9_]+$ ]] || \
      [[ "${env_name}" =~ ^DMA_[A-Za-z0-9_]+$ ]] || \
