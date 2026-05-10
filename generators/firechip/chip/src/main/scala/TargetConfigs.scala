@@ -316,6 +316,28 @@ class FireSimGemminiReRoCCPairDummy16x16C4P8Sbus128NICNoTraceConfig extends Conf
   new WithFireSimConfigTweaks ++
   new chipyard.GemminiLearningConfigSpadReRoCCGlobalNoC4C2x2P8x4x2CoupledDMAPairManagerDummy16x16Sbus128)
 
+class FireSimGemminiReRoCCPairDummy8x8C1P1Sbus64DebugConfig extends Config(
+  new WithDefaultFireSimBridges ++
+  new WithFireSimConfigTweaks ++
+  new chipyard.GemminiLearningConfigSpadReRoCCGlobalNoC1C1x1P1x1x1CoupledDMAPairManagerDummy8x8Sbus64)
+
+class FireSimGemminiReRoCCPairDummy8x8C1P1Sbus64NICDebugConfig extends Config(
+  new WithNIC ++
+  new WithDefaultFireSimBridges ++
+  new WithFireSimConfigTweaks ++
+  new chipyard.GemminiLearningConfigSpadReRoCCGlobalNoC1C1x1P1x1x1CoupledDMAPairManagerDummy8x8Sbus64)
+
+class FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64DebugConfig extends Config(
+  new WithDefaultFireSimBridges ++
+  new WithFireSimConfigTweaks ++
+  new chipyard.GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P6x3x2CoupledDMAPairManagerDummy8x8Sbus64)
+
+class FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64NICDebugConfig extends Config(
+  new WithNIC ++
+  new WithDefaultFireSimBridges ++
+  new WithFireSimConfigTweaks ++
+  new chipyard.GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P6x3x2CoupledDMAPairManagerDummy8x8Sbus64)
+
 class FireSimGemminiReRoCCPairDummy8x8C4P12Sbus64NICNoTraceConfig extends Config(
   new WithNIC ++
   new chipyard.config.WithNoTraceIO ++

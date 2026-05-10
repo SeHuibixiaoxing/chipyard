@@ -10,6 +10,7 @@ import freechips.rocketchip.rocket._
 import freechips.rocketchip.util._
 import freechips.rocketchip.prci._
 import freechips.rocketchip.subsystem._
+import midas.targetutils.{PerfCounter, SynthesizePrintf}
 
 import rerocc.bus._
 
@@ -48,6 +49,19 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, supportedOpcodes: Seq[UI
 
     val (rerocc, edge) = node.in(0)
     val s_idle :: s_active :: s_rel_wait :: s_sfence :: s_unbusy :: Nil = Enum(5)
+
+    def ageWhile(active: Bool, width: Int = 32): UInt = {
+      val age = RegInit(0.U(width.W))
+      when (active) {
+        when (!age.andR) { age := age + 1.U }
+      } .otherwise {
+        age := 0.U
+      }
+      age
+    }
+
+    def debugStuckPrint(age: UInt): Bool =
+      age === 1024.U || (age > 1024.U && age(11, 0) === 0.U)
 
     val numClients = edge.cParams.clients.map(_.nCfgs).sum
 
@@ -150,6 +164,22 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, supportedOpcodes: Seq[UI
       }
     }
 
+    when (rr_req.fire) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-req] mgr=%d state=%d opcode=%d client=%d beat=%d first=%d last=%d data=%x qcount=%d busy=%d\n",
+        io.manager_id, state, rr_req.bits.opcode, rr_req.bits.client_id,
+        req_beat, req_first.asUInt, req_last.asUInt, rr_req.bits.data,
+        inst_q.io.count, io.busy.asUInt))
+    }
+
+    when (inst_q.io.enq.fire) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-inst-enq] mgr=%d client=%d qcount=%d opc=%x funct=%x rd=%d rs1=%x rs2=%x\n",
+        io.manager_id, client, inst_q.io.count, inst_q.io.enq.bits.inst.opcode,
+        inst_q.io.enq.bits.inst.funct, inst_q.io.enq.bits.inst.rd,
+        inst_q.io.enq.bits.rs1, inst_q.io.enq.bits.rs2))
+    }
+
     // acquire->ack/nack
     resp_arb.io.in(0).bits.opcode := ReRoCCProtocol.sAcqResp
     resp_arb.io.in(0).bits.client_id := rr_req.bits.client_id
@@ -166,6 +196,30 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, supportedOpcodes: Seq[UI
     resp_arb.io.in(1).bits.manager_id := io.manager_id
     resp_arb.io.in(1).bits.data       := 0.U
 
+    val cmdBlockedAge = ageWhile(io.cmd.valid && !io.cmd.ready)
+    when (debugStuckPrint(cmdBlockedAge)) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-cmd-stuck] mgr=%d age=%d state=%d qcount=%d cmd_valid=%d cmd_ready=%d accel_busy=%d resp_ready=%d opc=%x funct=%x\n",
+        io.manager_id, cmdBlockedAge, state, inst_q.io.count,
+        io.cmd.valid.asUInt, io.cmd.ready.asUInt, io.busy.asUInt,
+        resp_arb.io.in(1).ready.asUInt, io.cmd.bits.inst.opcode,
+        io.cmd.bits.inst.funct))
+    }
+
+    when (io.cmd.fire) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-cmd-fire] mgr=%d client=%d qcount=%d opc=%x funct=%x rd=%d rs1=%x rs2=%x\n",
+        io.manager_id, client, inst_q.io.count, io.cmd.bits.inst.opcode,
+        io.cmd.bits.inst.funct, io.cmd.bits.inst.rd, io.cmd.bits.rs1,
+        io.cmd.bits.rs2))
+    }
+
+    when (resp_arb.io.in(1).fire) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-inst-ack] mgr=%d client=%d qcount=%d\n",
+        io.manager_id, client, inst_q.io.count))
+    }
+
     // writebacks
     val resp = Queue(io.resp)
     val resp_rd = RegInit(false.B)
@@ -176,6 +230,12 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, supportedOpcodes: Seq[UI
     resp_arb.io.in(2).bits.data       := Mux(resp_rd, resp.bits.rd, resp.bits.data)
     when (resp_arb.io.in(2).fire) { resp_rd := !resp_rd }
     resp.ready := resp_arb.io.in(2).ready && resp_rd
+
+    when (resp_arb.io.in(2).fire) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-write] mgr=%d client=%d data=%x rd_phase=%d\n",
+        io.manager_id, client, resp_arb.io.in(2).bits.data, resp_rd.asUInt))
+    }
 
     // release
     resp_arb.io.in(3).valid           := state === s_rel_wait && !io.busy && inst_q.io.count === 0.U
@@ -189,6 +249,20 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, supportedOpcodes: Seq[UI
     }
     when (state === s_sfence) { state := s_idle }
 
+    val relWaitAge = ageWhile(state === s_rel_wait && !(resp_arb.io.in(3).valid && resp_arb.io.in(3).ready))
+    when (debugStuckPrint(relWaitAge)) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-release-stuck] mgr=%d age=%d busy=%d qcount=%d resp_ready=%d\n",
+        io.manager_id, relWaitAge, io.busy.asUInt, inst_q.io.count,
+        resp_arb.io.in(3).ready.asUInt))
+    }
+
+    when (resp_arb.io.in(3).fire) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-release-resp] mgr=%d client=%d\n",
+        io.manager_id, client))
+    }
+
     // unbusyack
     resp_arb.io.in(4).valid           := state === s_unbusy && !io.busy && inst_q.io.count === 0.U
     resp_arb.io.in(4).bits.opcode     := ReRoCCProtocol.sUnbusyAck
@@ -196,7 +270,41 @@ class ReRoCCManager(reRoCCTileParams: ReRoCCTileParams, supportedOpcodes: Seq[UI
     resp_arb.io.in(4).bits.manager_id := io.manager_id
     resp_arb.io.in(4).bits.data       := 0.U
 
-    when (resp_arb.io.in(4).fire) { state := s_active }
+    val unbusyWaitAge = ageWhile(state === s_unbusy && !(resp_arb.io.in(4).valid && resp_arb.io.in(4).ready))
+    when (debugStuckPrint(unbusyWaitAge)) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-unbusy-stuck] mgr=%d age=%d busy=%d qcount=%d resp_ready=%d\n",
+        io.manager_id, unbusyWaitAge, io.busy.asUInt, inst_q.io.count,
+        resp_arb.io.in(4).ready.asUInt))
+    }
+
+    when (resp_arb.io.in(4).fire) {
+      SynthesizePrintf(printf(
+        "[rrc-manager-unbusy-ack] mgr=%d client=%d\n",
+        io.manager_id, client))
+      state := s_active
+    }
+
+    val debugState = Cat(
+      state,
+      rr_req.valid,
+      rr_req.ready,
+      rr_req.bits.opcode,
+      req_beat,
+      inst_q.io.count,
+      io.cmd.valid,
+      io.cmd.ready,
+      io.busy,
+      io.resp.valid,
+      io.resp.ready,
+      resp_arb.io.out.valid,
+      resp_arb.io.out.ready)
+    PerfCounter.identity(debugState, s"rerocc_manager_${reRoCCTileParams.reroccId}_state",
+      "ReRoCC manager command path state")
+    PerfCounter(io.cmd.fire.asUInt, s"rerocc_manager_${reRoCCTileParams.reroccId}_cmd_fire",
+      "ReRoCC manager forwarded a RoCC command")
+    PerfCounter(resp_arb.io.in(1).fire.asUInt, s"rerocc_manager_${reRoCCTileParams.reroccId}_inst_ack",
+      "ReRoCC manager emitted an instruction acknowledgement")
   }
 }
 

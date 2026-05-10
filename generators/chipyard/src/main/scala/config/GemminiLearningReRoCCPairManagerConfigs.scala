@@ -253,6 +253,56 @@ class GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P2x1x2CoupledDMAPairManager
     globalNoCVirtualChannelDepth = 8
   )
 
+class GemminiLearningConfigSpadReRoCCGlobalNoC1C1x1P1x1x1CoupledDMAPairManagerDummy8x8Sbus64
+  extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
+    numCores = 1,
+    cpuX = 1,
+    cpuY = 1,
+    numPairs = 1,
+    pairX = 1,
+    pairY = 1,
+    sbusWidthBits = 8 * 8,
+    nMemoryChannels = 1,
+    freqMHz = 1000.0,
+    meshRows = 8,
+    meshColumns = 8,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4,
+    pairTlMaxInFlight = Some(16),
+    pairAtlMaxInFlight = Some(16)
+  )
+
+class GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P6x3x2CoupledDMAPairManagerDummy8x8Sbus64
+  extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
+    numCores = 2,
+    cpuX = 1,
+    cpuY = 2,
+    numPairs = 6,
+    pairX = 3,
+    pairY = 2,
+    sbusWidthBits = 8 * 8,
+    nMemoryChannels = 1,
+    freqMHz = 1000.0,
+    meshRows = 8,
+    meshColumns = 8,
+    useGlobalNoC = true,
+    useDeterministicGlobalNoCRouting = true,
+    useDummyGemmini = true,
+    filterDmaVisibleManagers = true,
+    connectSbusSlaveToStl = true,
+    sharedSpadBytes = 1024 * 1024,
+    useCompactPairManagerLayout = true,
+    globalNoCVirtualChannelDepth = 4,
+    pairTlMaxInFlight = Some(64),
+    pairAtlMaxInFlight = Some(64)
+  )
+
 class GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P2x1x2CoupledDMAPairManagerCompact4x4Sbus128
   extends GemminiLearningConfigSpadReRoCCNoCPairManagerParametric(
     numCores = 2,

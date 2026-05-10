@@ -7,6 +7,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tile._
 import freechips.rocketchip.rocket._
 import freechips.rocketchip.util._
+import midas.targetutils.{PerfCounter, SynthesizePrintf}
 
 import rerocc.bus._
 import rerocc.manager.{ReRoCCIBufEntriesKey}
@@ -76,6 +77,19 @@ class ReRoCCClient(_params: ReRoCCClientParams = ReRoCCClientParams())(implicit 
     val (rerocc, edge) = reRoCCNode.out(0)
     val (resp_first, resp_last, resp_beat) = ReRoCCMsgFirstLast(rerocc.resp, false)
     val nCfgs = params.nCfgs
+
+    def ageWhile(active: Bool, width: Int = 32): UInt = {
+      val age = RegInit(0.U(width.W))
+      when (active) {
+        when (!age.andR) { age := age + 1.U }
+      } .otherwise {
+        age := 0.U
+      }
+      age
+    }
+
+    def debugStuckPrint(age: UInt): Bool =
+      age === 1024.U || (age > 1024.U && age(11, 0) === 0.U)
 
     val inst_sender = Module(new InstructionSender(edge.bundle))
 
@@ -217,6 +231,40 @@ class ReRoCCClient(_params: ReRoCCClientParams = ReRoCCClientParams())(implicit 
     cfg_credit_deq.valid := inst_sender.io.cmd.fire
     cfg_credit_deq.bits := cmd_cfg_id
 
+    val cmdBlockedAge = ageWhile(io.cmd.valid && !io.cmd.ready)
+    when (debugStuckPrint(cmdBlockedAge)) {
+      SynthesizePrintf(printf(
+        "[rrc-client-stuck] tile=%d age=%d valid=%d ready=%d cfg=%d mgr=%d opc=%x funct=%x credit=%d status=%d ptbr=%d acq_state=%d sender_ready=%d cfg_credit=%d\n",
+        params.tileId.U, cmdBlockedAge, io.cmd.valid.asUInt, io.cmd.ready.asUInt,
+        cmd_cfg_id, cmd_cfg.mgr, io.cmd.bits.inst.opcode, io.cmd.bits.inst.funct,
+        credit_available.asUInt, status_ready.asUInt, ptbr_ready.asUInt, cfg_acq_state,
+        inst_sender.io.cmd.ready.asUInt, cfg_credits(cmd_cfg_id)))
+    }
+
+    when (inst_sender.io.cmd.fire) {
+      SynthesizePrintf(printf(
+        "[rrc-client-cmd] tile=%d cfg=%d mgr=%d opc=%x funct=%x rd=%d xs1=%d xs2=%d rs1=%x rs2=%x credits=%d\n",
+        params.tileId.U, cmd_cfg_id, cmd_cfg.mgr, io.cmd.bits.inst.opcode,
+        io.cmd.bits.inst.funct, io.cmd.bits.inst.rd, io.cmd.bits.inst.xs1.asUInt,
+        io.cmd.bits.inst.xs2.asUInt, io.cmd.bits.rs1, io.cmd.bits.rs2,
+        cfg_credits(cmd_cfg_id)))
+    }
+
+    when (req_arb.io.in(0).fire) {
+      SynthesizePrintf(printf(
+        "[rrc-client-cfg-req] tile=%d state=%d cfg=%d mgr=%d opcode=%d data=%x\n",
+        params.tileId.U, cfg_acq_state, cfg_acq_id, cfg_acq_mgr_id,
+        req_arb.io.in(0).bits.opcode, req_arb.io.in(0).bits.data))
+    }
+
+    when (req_arb.io.in(1).fire) {
+      SynthesizePrintf(printf(
+        "[rrc-client-inst-beat] tile=%d cfg=%d mgr=%d opcode=%d data=%x\n",
+        params.tileId.U, req_arb.io.in(1).bits.client_id,
+        req_arb.io.in(1).bits.manager_id, req_arb.io.in(1).bits.opcode,
+        req_arb.io.in(1).bits.data))
+    }
+
     val f_req_val = cfg_fence_state.map(_ === f_req)
     val f_req_oh = PriorityEncoderOH(f_req_val)
     req_arb.io.in(2).valid := f_req_val.orR && !inst_sender.io.busy && !io.cmd.valid
@@ -226,6 +274,13 @@ class ReRoCCClient(_params: ReRoCCClientParams = ReRoCCClientParams())(implicit 
     req_arb.io.in(2).bits.data := 0.U
     when (req_arb.io.in(2).fire) {
       cfg_fence_state(OHToUInt(f_req_oh)) := f_ack
+    }
+
+    when (req_arb.io.in(2).fire) {
+      SynthesizePrintf(printf(
+        "[rrc-client-unbusy-req] tile=%d cfg=%d mgr=%d\n",
+        params.tileId.U, req_arb.io.in(2).bits.client_id,
+        req_arb.io.in(2).bits.manager_id))
     }
 
     rerocc.resp.ready := false.B
@@ -239,6 +294,13 @@ class ReRoCCClient(_params: ReRoCCClientParams = ReRoCCClientParams())(implicit 
         cfg_updatestatus(cfg_acq_id) := true.B
         cfg_updateptbr(cfg_acq_id) := true.B
       }
+    }
+    when (rerocc.resp.fire) {
+      SynthesizePrintf(printf(
+        "[rrc-client-resp] tile=%d opcode=%d cfg=%d mgr=%d data=%x first=%d last=%d\n",
+        params.tileId.U, rerocc.resp.bits.opcode, rerocc.resp.bits.client_id,
+        rerocc.resp.bits.manager_id, rerocc.resp.bits.data,
+        resp_first.asUInt, resp_last.asUInt))
     }
     when (rerocc.resp.bits.opcode === ReRoCCProtocol.sInstAck) { rerocc.resp.ready := true.B }
     cfg_credit_enq.valid := rerocc.resp.bits.opcode === ReRoCCProtocol.sInstAck && rerocc.resp.fire
@@ -287,5 +349,26 @@ class ReRoCCClient(_params: ReRoCCClientParams = ReRoCCClientParams())(implicit 
 
     when (io.ptw(0).ptbr.asUInt =/= RegNext(io.ptw(0).ptbr).asUInt) { cfg_updateptbr.foreach(_ := true.B) }
     when (io.ptw(0).status.asUInt =/= RegNext(io.ptw(0).status).asUInt) { cfg_updatestatus.foreach(_ := true.B) }
+
+    val debugState = Cat(
+      cfg_acq_state,
+      inst_sender.io.busy,
+      io.cmd.valid,
+      io.cmd.ready,
+      credit_available,
+      status_ready,
+      ptbr_ready,
+      req_arb.io.in(1).valid,
+      req_arb.io.in(1).ready,
+      rerocc.resp.valid,
+      rerocc.resp.ready,
+      cmd_cfg_id,
+      cmd_cfg.mgr)
+    PerfCounter.identity(debugState, s"rerocc_client_${params.tileId}_state",
+      "ReRoCC client command path state")
+    PerfCounter(inst_sender.io.cmd.fire.asUInt, s"rerocc_client_${params.tileId}_cmd_fire",
+      "ReRoCC client accepted a RoCC command")
+    PerfCounter(cfg_credit_enq.valid.asUInt, s"rerocc_client_${params.tileId}_inst_ack",
+      "ReRoCC client received an instruction acknowledgement")
   }
 }
