@@ -56,6 +56,14 @@ class WithFireSimMultiCycleRegfile extends Config((site, here, up) => {
   case FireSimMultiCycleRegFile => true
 })
 
+class WithRocketSynthPCDebug extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site).map {
+    case tp: RocketTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      core = tp.tileParams.core.copy(synthPCDebug = true)))
+    case other => other
+  }
+})
+
 // Model multithreading optimization
 class WithFireSimFAME5 extends Config((site, here, up) => {
   case FireSimFAME5 => true
@@ -323,6 +331,8 @@ class FireSimGemminiReRoCCPairDummy8x8C1P1Sbus64DebugConfig extends Config(
 
 class FireSimGemminiReRoCCPairDummy8x8C1P1Sbus64NICDebugConfig extends Config(
   new WithNIC ++
+  new chipyard.config.WithNoTraceIO ++
+  new WithRocketSynthPCDebug ++
   new WithDefaultFireSimBridges ++
   new WithFireSimConfigTweaks ++
   new chipyard.GemminiLearningConfigSpadReRoCCGlobalNoC1C1x1P1x1x1CoupledDMAPairManagerDummy8x8Sbus64)
@@ -334,6 +344,8 @@ class FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64DebugConfig extends Config(
 
 class FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64NICDebugConfig extends Config(
   new WithNIC ++
+  new chipyard.config.WithNoTraceIO ++
+  new WithRocketSynthPCDebug ++
   new WithDefaultFireSimBridges ++
   new WithFireSimConfigTweaks ++
   new chipyard.GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P6x3x2CoupledDMAPairManagerDummy8x8Sbus64)
