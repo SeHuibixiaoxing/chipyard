@@ -230,6 +230,12 @@ Timing:
 - Both produced `post_route.VIOLATED.dcp`, and the 1p1c violated checkpoint
   still passes the smoke workload. So the existence of a timing violation alone
   is not a sufficient explanation.
+- This matches the AWS F2 HDK documentation: the flow can still emit a DCP
+  tarball when timing failures are present, but functionality is not guaranteed
+  and such images are only suitable for testing
+  (`https://awsdocs-fpga-f2.readthedocs-hosted.com/latest/hdk/README.html`).
+  Therefore timing reports must be kept as risk evidence, while FireSim workload
+  pass/fail remains the runtime authority.
 - The 6p2c route log additionally reports timing congestion level 6:
   `Congestion levels of 5 and greater may impact timing closure`.
 - Worst visible timing paths are mostly shell DDR/reset/status or clock-domain
