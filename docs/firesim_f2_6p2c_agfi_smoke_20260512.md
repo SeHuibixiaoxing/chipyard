@@ -502,6 +502,16 @@ Build-memory observation from the diagnostic rebuild:
   vCPUs, `m8i.4xlarge` needs 16, and `m8i.8xlarge` needs 32, so the 6p2c
   remote Vivado builder cannot launch until an existing builder exits or the
   quota is raised.
+- The release order matters. If the 1p1c builder exits first, only 8 vCPUs are
+  freed and the active `m8i.4xlarge` 6p2c retry still cannot launch while the
+  4p2c `z1d.3xlarge` builder remains active. That state can support a 12-vCPU
+  `z1d.3xlarge` 6p2c retry if regional capacity is available. If the 4p2c
+  builder exits first, the active `m8i.4xlarge` 6p2c retry has enough quota.
+- A stale orphaned `m8i.8xlarge` 6p2c build process was found after its tmux
+  session had already been stopped. It was still retrying a 32-vCPU builder and
+  could have consumed the entire On-Demand Standard quota if it launched after
+  resources freed. The orphaned process group was terminated; no
+  `pairdummy8x8sbus64c2p6hwdbgdiag-m8i8` EC2 instance was running or pending.
 
 Pipeline-runtime mapping preparation:
 
