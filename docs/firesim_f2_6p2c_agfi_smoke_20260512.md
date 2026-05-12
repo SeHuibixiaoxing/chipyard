@@ -410,6 +410,22 @@ logs:
   and immediately before the new host-control debug attaches. The C++ PeekPoke
   debug reads therefore start at `PRECISE_PEEKABLE + 4`.
 
+The first 1p1c diagnostic rebuild exposed one real diagnostic-code bug before
+Vivado:
+
+- GoldenGate failed in `ClockBridge.scala` while elaborating the 1-clock 1p1c
+  target.
+- The bad expression was `tokenBits.pad(32)` on a 1-bit Chisel `UInt` derived
+  from `Vec[Bool].asUInt`.
+- Chisel tried to clone a `Bool`-typed width through `cloneTypeWidth`, producing
+  a host-build failure before Verilog generation.
+- The fix is explicit width construction:
+  `if (clockInfo.size >= 32) tokenBits(31, 0) else Cat(0.U((32 - clockInfo.size).W), tokenBits)`.
+
+This was a build-time bug in the new diagnostic probe, not the original 6p2c
+runtime failure. It is nevertheless important because it proves the diagnostic
+path is being exercised on the small control target before we trust it on 6p2c.
+
 Three comparable F2 diagnostic builds are prepared:
 
 | Scale | Build config | Build recipe | Builder |
@@ -423,6 +439,35 @@ NIC hardware-debug family as 6p2c. It uses `numPairs = 4`, `pairX = 2`,
 `pairY = 2`, and keeps the 6p2c queue-depth settings
 `pairTlMaxInFlight = Some(64)` and `pairAtlMaxInFlight = Some(64)` so the A/B
 primarily varies target size instead of queue policy.
+
+Build-memory observation from the diagnostic rebuild:
+
+- Running 4p2c and 6p2c GoldenGate locally at the same time pushed the manager
+  host into heavy swap I/O and very high iowait.
+- After stopping the 6p2c local GoldenGate, the 4p2c process continued alone at
+  roughly 12-15 GiB RSS.
+- The host already has about 105 GiB of swap, so the immediate limiter is not
+  swap capacity; it is I/O thrashing when two large GoldenGate JVMs run
+  concurrently on this manager.
+- The 6p2c diagnostic build was restarted only after the 4p2c local GoldenGate
+  phase moved to a remote Vivado builder. During the restarted 6p2c GoldenGate
+  phase, swap remained far from full and no OOM evidence appeared; extra swap is
+  therefore not the right fix unless future runs approach swap exhaustion.
+
+Pipeline-runtime mapping preparation:
+
+- Existing pipeline-runtime profiles do not contain a
+  `dummy8x8 + 2-core + 6-pair + sbus64` target.
+- A matching HybridMapper target key is
+  `rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64`.
+- Its source hardware class is
+  `GemminiLearningConfigSpadReRoCCGlobalNoC2C1x2P6x3x2CoupledDMAPairManagerDummy8x8Sbus64`.
+- The target entry uses `num_cores=2`, `num_gemmini=6`, `num_dma=6`,
+  `num_macs_per_array=64`, `sbus_width_bits=64`, and `memory_channels=1`,
+  matching the Chisel source instead of copying the old 4c12p profile.
+- Mapping generation should wait until local memory pressure drops; running
+  HybridMapper while 6p2c GoldenGate is at peak RSS risks unnecessary swap
+  pressure.
 
 Required first smoke after any AGFI becomes available:
 
