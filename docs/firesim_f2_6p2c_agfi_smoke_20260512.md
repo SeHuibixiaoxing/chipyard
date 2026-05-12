@@ -467,6 +467,24 @@ Build-memory observation from the diagnostic rebuild:
   graph pass over the expanded debug-heavy design, not to FireSim manager
   polling, Linux workload setup, or AGFI registration.
 
+6p2c build-host launch retry issue:
+
+- The restarted 6p2c build completed the local GoldenGate and driver compile
+  phases far enough to emit `FireSim-generated.sv` and the F2 driver collateral.
+- It then failed before remote Vivado because AWS had no immediate
+  `z1d.3xlarge` capacity in the supported subnets and reported `z1d.3xlarge`
+  unsupported in `us-west-2d`.
+- The code-level root cause for the immediate abort is in FireSim's
+  `AWSEC2.request_build_host`: it called `launch_instances()` without
+  a timeout argument, so `launch_instances()` used its default
+  `timeout=timedelta(0)` and aborted after one pass over the subnets. This is
+  different from run-farm launch, where `launch_instances_timeout_minutes` is
+  parsed and passed through.
+- The fix aligns build farm with run farm by parsing
+  `launch_instances_timeout_minutes` in `AWSEC2` and forwarding it to
+  `launch_instances()`. The hostdebug 1p1c/4p2c/6p2c build configs now set a
+  60-minute retry window.
+
 Pipeline-runtime mapping preparation:
 
 - Existing pipeline-runtime profiles do not contain a
