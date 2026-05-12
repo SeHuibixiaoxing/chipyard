@@ -494,6 +494,14 @@ Build-memory observation from the diagnostic rebuild:
   `m8i.4xlarge` with `build_host_swap_size_gb=64`. This is a capacity/memory
   mitigation for the remote builder only; it does not change the AGFI design
   inputs.
+- A separate AWS quota check explains why fallback builders could not launch
+  while 1p1c and 4p2c were both active: the account's On-Demand Standard quota
+  is 32 vCPUs. The manager (`c5.2xlarge`, 8 vCPUs), the 1p1c builder
+  (`m8i.2xlarge`, 8 vCPUs), and the 4p2c builder (`z1d.3xlarge`, 12 vCPUs)
+  already consumed 28 vCPUs, leaving only 4. A new `z1d.3xlarge` needs 12
+  vCPUs, `m8i.4xlarge` needs 16, and `m8i.8xlarge` needs 32, so the 6p2c
+  remote Vivado builder cannot launch until an existing builder exits or the
+  quota is raised.
 
 Pipeline-runtime mapping preparation:
 
