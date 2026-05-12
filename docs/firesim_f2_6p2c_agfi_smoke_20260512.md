@@ -527,6 +527,41 @@ Pipeline-runtime mapping preparation:
 - Mapping generation should wait until local memory pressure drops; running
   HybridMapper while 6p2c GoldenGate is at peak RSS risks unnecessary swap
   pressure.
+- With local GoldenGate no longer active, the 6p2c bertmini runtime artifacts
+  were generated from the existing HybridMapper `output/pipeline/bertmini`
+  intermediates:
+
+  ```sh
+  ./.conda-env/bin/python conference/HybridMapper/scripts/create-pipeline-runtime-artifacts.py \
+    --model bertmini \
+    --target-keys rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64 \
+    --mode fresh \
+    --methods ours2,gemini2,tangram2
+  ```
+
+  The first attempted `--mode legacy` export failed because that path only
+  reads `mapping_gemmini/`, while the available source directory contains raw
+  `mapping/*.yaml`. The code-level boundary is
+  `emit_runtime_layer_mapping_from_legacy()` versus
+  `emit_runtime_layer_mapping_from_fresh()` in
+  `conference/HybridMapper/scripts/create-pipeline-runtime-artifacts.py`.
+  The `fresh` path flattens the raw mapping candidates and reuses the existing
+  `entire_model/6_1024_8_19_64_{ours2,gemini2,tangram2}.yaml` files, so it does
+  not rerun the expensive SA search.
+- Generated files are intentionally under ignored
+  `conference/HybridMapper/output/`. The key 6p outputs are:
+  `hardware_target.rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64.yaml`,
+  `gemmini_layer_mapping.rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64.yaml`,
+  `graph_partition.rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64.yaml`,
+  `pipeline_mapping.rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64.{ours2,gemini2,tangram2}.yaml`,
+  and
+  `runtime_input.rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64.bin`.
+- Static artifact audit passed for all three methods using
+  `pipeline-runtime/scripts/audit_pipeline_runtime_artifact.py` against the 6p
+  pipeline YAML, hardware YAML, model YAML, and expected target key:
+  `ours2` has 22 segments, `gemini2` has 20 segments, and `tangram2` has 16
+  segments. All checks kept `page_size_bytes=1024`, `rr_stage_scope_budget=15`,
+  and `reserved_cfg=31`.
 
 Required first smoke after any AGFI becomes available:
 
