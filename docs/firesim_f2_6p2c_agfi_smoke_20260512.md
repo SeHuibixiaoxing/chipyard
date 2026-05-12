@@ -453,6 +453,13 @@ Build-memory observation from the diagnostic rebuild:
   phase moved to a remote Vivado builder. During the restarted 6p2c GoldenGate
   phase, swap remained far from full and no OOM evidence appeared; extra swap is
   therefore not the right fix unless future runs approach swap exhaustion.
+- A live JVM stack sample during the restarted 6p2c local phase placed the main
+  thread in `midas.passes.SimulationMapping` under
+  `firrtl.transforms.RemoveWires`, specifically
+  `firrtl.graph.DiGraph.linearize/getVertices` while resizing a Scala
+  `LinkedHashSet`. This pins the memory/latency pressure to a concrete FIRRTL
+  graph pass over the expanded debug-heavy design, not to FireSim manager
+  polling, Linux workload setup, or AGFI registration.
 
 Pipeline-runtime mapping preparation:
 
