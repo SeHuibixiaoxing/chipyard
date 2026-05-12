@@ -1,330 +1,320 @@
-# FireSim F2 6p2c AGFI Smoke Note
+# FireSim F2 6p2c AGFI Smoke and Root-Cause Boundary
 
 Date: 2026-05-12
 
 ## Scope
 
-This note records the 6-pair/2-core/sbus64/NIC hardware-debug AGFI smoke test
-before attempting pipeline-runtime mapping or Linux workloads.
+This note records the investigation of the 6p2c/sbus64/NIC hardware-debug F2
+AGFI with synthesizable debug output, compared against the nearby working 1p1c
+hardware-debug AGFI. The goal is to decide whether the 6p2c bitstream is usable
+for Linux and pipeline-runtime testing, and to separate source drift from
+implementation failure.
 
-The AGFI under test is the new synthesizable-output 6p2c build that was produced
-near the validated 1p1c build.
+## Short Conclusion
 
-## Target
+The current 6p2c AGFI is not usable for Linux or pipeline-runtime tests:
 
-- Target name:
-  `firesim_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug`
-- AGFI:
-  `agfi-0d0fc22b1ba532727`
-- AFI:
-  `afi-025d2a3afc4a7c9ca`
-- Deploy quintuplet:
-  `f2-firesim-FireSim-FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64NICDebugConfig-WithTargetCycleDebug_WithPrintfSynthesis_WithSynthAsserts_FRFCFS16GBQuadRank_BaseF2Config`
-- HWDB:
-  `sims/firesim/deploy/config_hwdb_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug.yaml`
-- Build recipe:
-  `sims/firesim/deploy/config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug.yaml`
+- 6p2c F2 AGFI `agfi-0d0fc22b1ba532727` reaches FireSim fingerprint, but the
+  first driver step never completes.
+- Before the first step, 6p2c F2 already reads `PeekPoke DONE=0`,
+  `ClockBridge tcycle=0`, and `ClockBridge hcycle=0`.
+- The exact 6p2c Verilator metasim triplet passes bare-metal hello, with
+  pre-step `DONE=1` and nonzero `hcycle`.
+- The 1p1c F2 AGFI with the same `WithTargetCycleDebug` platform config passes
+  the bare-metal smoke workload.
 
-The AGFI is available in AWS and reports shell version `0x10212415`.
+The source-backed boundary is therefore: this is not a Linux, workload, mapping,
+or pipeline-runtime DMA problem. It is also not explained by FireSim or other
+repo code drift between the two build times. The failure is in the 6p2c F2
+implemented bitstream/control state after FPGA implementation.
 
-## Runs
+## AGFIs and Runs
 
-### 1p1c TargetCycleDebug Control Run
+Working 1p1c control:
 
-The known-working 1p1c hardware-debug AGFI also uses TargetCycleDebug:
-
+- Build result:
+  `sims/firesim/deploy/results-build/2026-05-11--11-53-05-firesim_gemmini_rerocc_pairmanager_dummy8x8_1c1p1_sbus64_nic_hwdebug/`
+- AGFI/AFI: `agfi-098bce7d5e0c3d937` / `afi-0d63b7450829af6c6`
 - Target config:
   `FireSimGemminiReRoCCPairDummy8x8C1P1Sbus64NICDebugConfig`
 - Platform config:
   `WithTargetCycleDebug_WithPrintfSynthesis_WithSynthAsserts_FRFCFS16GBQuadRank_BaseF2Config`
-- AGFI:
-  `agfi-098bce7d5e0c3d937`
-- Result:
+- Passing result:
   `sims/firesim/deploy/results-workload/2026-05-12--12-25-50-rerocc-lc-baremetal-cfg32-slot-smoke-quick-f2-rerocc-baremetal-cfg32-slot-smoke-quick-1c1p1-nic-hwdebug-tcdlite/`
+- Key lines:
+  `TARGETCYCLE DEBUG enabled ... labels hport=0 wire_in=9 wire_out=256 rv_in=4 rv_out=6`,
+  `FireSim fingerprint: 0x46697265`,
+  `*** PASSED *** after 44104832 cycles`.
 
-Key `uartlog` lines:
+Failing 6p2c F2:
 
-- `TARGETCYCLE DEBUG enabled widget=0 dump_limit=1 mask_chunks=8 labels hport=0 wire_in=9 wire_out=256 rv_in=4 rv_out=6`
-- `FireSim fingerprint: 0x46697265`
-- `TARGETCYCLE DEBUG [tick] widget=0 hcycle=1187939002 ...`
-- `*** PASSED *** after 44104832 cycles`
-
-This is the direct control proving that TargetCycleDebug is not, by itself, a
-fatal feature on F2.
-
-### Driver-Debug Smoke
-
-Runtime:
-`sims/firesim/deploy/config_runtime_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hello_baremetal_driverdebug.yaml`
-
-Result:
-`sims/firesim/deploy/results-workload/2026-05-12--14-31-46-hello-baremetal-f2-hello-baremetal-2c6p6-nic-hwdebug-driverdebug/`
-
-Key `uartlog` lines:
-
-- `FireSim fingerprint: 0x46697265`
-- `Commencing simulation.`
-- `FIRESIM DRIVER DEBUG [before_step] step=0 step_size=4294967295 done=0 tcycle=0 hcycle=0`
-- `FIRESIM DRIVER DEBUG [poll] step=0 poll=100000 total_poll=100000 done=0 tcycle=0 hcycle=0`
-- `Simulator deadlock detected at target cycle 0. Terminating.`
-- `*** FAILED *** (code = 1) after 0 cycles`
-
-### Driver-Debug plus TargetCycleDebug Smoke
-
-Runtime:
-`sims/firesim/deploy/config_runtime_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hello_baremetal_driverdebug_targetcycle.yaml`
-
-Commands were run through `scripts/firesim-tmux-run.sh`:
-
-- `launchrunfarm`
-  log:
-  `sims/firesim/deploy/logs/2026-05-12--14-47-04-launchrunfarm-HOBP5KG96OBL8V0G.log`
-  instance:
-  `i-0f1f691e4b50094ad`, private IP `192.168.1.38`
-- `infrasetup`
-  log:
-  `sims/firesim/deploy/logs/2026-05-12--14-47-45-infrasetup-B158MNOLRON1BAS7.log`
-  preflight:
-  `FireSim driver readiness preflight passed for slot 0`
-- `runworkload`
-  log:
-  `sims/firesim/deploy/logs/2026-05-12--14-51-44-runworkload-JM7OLJ3GALR1CUQ7.log`
-  result:
+- Build result:
+  `sims/firesim/deploy/results-build/2026-05-11--17-15-12-firesim_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug/`
+- AGFI/AFI: `agfi-0d0fc22b1ba532727` / `afi-025d2a3afc4a7c9ca`
+- Target config:
+  `FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64NICDebugConfig`
+- Platform config:
+  `WithTargetCycleDebug_WithPrintfSynthesis_WithSynthAsserts_FRFCFS16GBQuadRank_BaseF2Config`
+- Failing result:
   `sims/firesim/deploy/results-workload/2026-05-12--14-51-44-hello-baremetal-f2-hello-baremetal-2c6p6-nic-hwdebug-driverdebug-targetcycle/`
-- `terminaterunfarm`
-  log:
-  `sims/firesim/deploy/logs/2026-05-12--14-53-11-terminaterunfarm-2X01XX6ZQZFWS9EY.log`
+- Key lines:
+  `TARGETCYCLE DEBUG enabled ... labels hport=0 wire_in=9 wire_out=256 rv_in=4 rv_out=6`,
+  `FireSim fingerprint: 0x46697265`,
+  `FIRESIM DRIVER DEBUG [before_step] step=0 step_size=4294967295 done=0 tcycle=0 hcycle=0`,
+  `Simulator deadlock detected at target cycle 0. Terminating.`,
+  `*** FAILED *** (code = 1) after 0 cycles`.
 
-Key `uartlog` lines:
-
-- `TARGETCYCLE DEBUG enabled widget=0 dump_limit=1 mask_chunks=8 labels hport=0 wire_in=9 wire_out=256 rv_in=4 rv_out=6`
-- `FIRESIM DRIVER DEBUG enabled interval=100000`
-- `FireSim fingerprint: 0x46697265`
-- `FIRESIM DRIVER DEBUG [before_step] step=0 step_size=4294967295 done=0 tcycle=0 hcycle=0`
-- `FIRESIM DRIVER DEBUG [poll] step=0 poll=100000 total_poll=100000 done=0 tcycle=0 hcycle=0`
-- `Simulator deadlock detected at target cycle 0. Terminating.`
-- `FIRESIM DRIVER DEBUG [terminate] step=0 poll=100001 total_poll=100001 bridge=heartbeat exit_code=1 tcycle=0 hcycle=0`
-- `*** FAILED *** (code = 1) after 0 cycles`
-
-TargetCycleDebug initialized but did not emit a blocker dump before heartbeat
-terminated the run. That means the first-step hang is earlier than, or outside,
-the simple ready/valid blocker classes currently captured by that widget.
-
-No F2 instances remained after termination; AWS `describe-instances` returned
-`[]` for active/stopped `f2.*` instances.
-
-## Source-Backed Failure Boundary
-
-The failure is below Linux, ReRoCC software, mapping files, and pipeline-runtime
-DMA completion:
-
-- `simulation_t::execute_simulation_flow()` reaches `Commencing simulation`
-  after preflight, stream setup, and DRAM/program loading.
-- `firesim_top_t::simulation_run()` writes the first
-  `peek_poke.step(get_largest_stepsize(), false)` request, then polls
-  `peek_poke.is_done()` while ticking bridge drivers.
-- `peek_poke_t::step()` only writes the STEP register; completion authority is
-  the generated PeekPoke DONE register.
-- `heartbeat_t::tick()` reports deadlock because `clock.tcycle()` remains equal
-  to the previous target cycle.
-
-The log shows the generated model never raises DONE for step 0 and both
-ClockBridge counters stay at zero through 100001 polls. Therefore the first
-FAME token never completes. A `hello-baremetal` binary cannot execute even one
-target cycle on this AGFI.
-
-The code path is:
-
-- `firesim_top_t::simulation_run()` writes `peek_poke.step(step_size, false)`.
-- `peek_poke_t::step()` writes the generated `STEP` register.
-- `PeekPokeBridgeModule` clears `DONE` when `cycleHorizon` is non-zero and only
-  raises `DONE` again after `tCycleWouldAdvance` drains the requested tokens.
-- `tCycleWouldAdvance` is the AND of the bridge's channel decoupling flags.
-- `ClockBridgeModule` increments target cycle only when its clock token channel
-  fires.
-
-Since `ClockBridge` target and host cycle reads remain zero, the failure is not
-guest code running slowly; at least one token path required for the first
-simulator target cycle is not firing.
-
-TargetCycleDebug did not contradict this. The widget currently observes selected
-top-level wire/ready-valid channel maps, and `FPGATop` intentionally sets
-`hportLabels = Seq.empty`. `ClockTokenVector.bridgeChannels()` is also empty.
-Therefore the current TargetCycleDebug instance does not directly observe the
-ClockBridge token hPort or every bridge hPort. The absence of a blocker dump on
-6p2c only says the selected 9 wire inputs, 256 wire outputs, 4 RV inputs, and 6
-RV outputs did not trip the widget's derived problem masks before heartbeat
-terminated. It does not prove the first-token path is clean.
-
-Generated driver/header scale also differs substantially:
-
-- 1p1c TargetCycleDebug generated header:
-  about 10.5k lines and 1,822 synthesized assertion strings.
-- 6p2c TargetCycleDebug generated header:
-  about 45.5k lines and 10,349 synthesized assertion strings.
-
-Both report the same TargetCycleDebug label counts because the widget labels are
-clipped/selected at the FPGATop channel boundary. That count is not a measure of
-the full internal 6p2c target complexity.
-
-## What This Is Not
-
-- Not a pipeline-runtime mapping bug: the target cannot advance enough to boot
-  or run hello.
-- Not a Linux image issue: the same failure appears on bare-metal hello.
-- Not a `doneflag`/DMA completion issue: no ReRoCC/DMA test was reached, and
-  the evidence uses FireSim driver DONE/ClockBridge/heartbeat.
-- Not the earlier 1p1c driver-tar mismatch: this run used the deploy
-  quintuplet-derived driver path, and preflight fingerprint passed.
-- Not simply "TargetCycleDebug is enabled": the 1p1c TargetCycleDebug AGFI
-  completed the bare-metal smoke workload.
-- Not simply "Vivado reported a VIOLATED checkpoint": the working 1p1c AGFI
-  also has a `post_route.VIOLATED.dcp`. The 6p2c timing reports remain a risk,
-  but the violation status alone is not a sufficient explanation.
-
-## Current Root-Cause Boundary
-
-The observed failure is pinned below guest software and below generated-model
-semantics:
-
-- The exact 6p2c NIC+TargetCycleDebug Verilator metasim passes bare-metal
-  hello.
-- The F2 AGFI reaches FireSim fingerprint and master-widget init.
-- Before the first F2 driver step, `PeekPoke` already reads `DONE=0` and
-  `ClockBridge` reads `hCycle=0`, even though the generated RTL should have
-  `DONE=1` and a nonzero host cycle after reset release.
-
-The remaining unknown is the exact FPGA implementation mechanism that corrupts
-that host-control state. The leading suspect is timing/resource pressure in
-this large debug-heavy 6p2c F2 build, not a functional RTL deadlock and not
-TargetCycleDebug alone.
-
-## Local Metasim Boundary Test
-
-An exact local Verilator metasim boundary test passed for the same 6p2c
-NIC+TargetCycleDebug triplet:
+Passing 6p2c exact metasim:
 
 - Runtime:
   `sims/firesim/deploy/config_runtime_local_metasim_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hello_baremetal_targetcycle.yaml`
-- HWDB:
-  `sims/firesim/deploy/config_hwdb_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug.yaml`
-- Build recipe:
-  `sims/firesim/deploy/config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug.yaml`
-- `launchrunfarm` log:
-  `sims/firesim/deploy/logs/2026-05-12--15-07-50-launchrunfarm-CFMKZKCOEFL2DLRB.log`
-- `infrasetup` log:
-  `sims/firesim/deploy/logs/2026-05-12--15-08-11-infrasetup-WVRXYQM7XGLD0OPY.log`
-- `runworkload` log:
-  `sims/firesim/deploy/logs/2026-05-12--15-42-41-runworkload-Z9MYUWIOQIMSBRCT.log`
 - Result:
   `sims/firesim/deploy/results-workload/2026-05-12--15-42-41-hello-baremetal-local-metasim-hello-baremetal-2c6p6-nic-hwdebug-targetcycle/`
+- Key lines:
+  `TARGETCYCLE DEBUG enabled ... labels hport=0 wire_in=9 wire_out=256 rv_in=4 rv_out=6`,
+  `FireSim fingerprint: 0x46697265`,
+  `Hello world from core 0, a rocket`,
+  `COMMAND_EXIT_CODE="0"`.
 
-Key `metasim_stderr.out` lines:
+## Build-Time Commit Comparison
 
-- `FIRESIM DRIVER DEBUG [before_step] step=0 step_size=5000000 done=1 tcycle=0 hcycle=7546`
-- `FIRESIM DRIVER DEBUG [poll] step=0 poll=1 total_poll=1 done=0 tcycle=11 hcycle=7562`
-- `Hello world from core 0, a rocket`
-- `FIRESIM DRIVER DEBUG [terminate] step=0 poll=2500 total_poll=2500 bridge=tsibridge exit_code=0 tcycle=31874 hcycle=59026`
-- `*** PASSED *** after 31874 cycles`
+`AGFI_INFO` records the FireSim commit embedded in the AFI description:
 
-This proves the generated 6p2c NIC+TargetCycleDebug model can accept a step,
-advance target cycles, retire Rocket instructions, and terminate normally when
-executed as the exact Verilator metasim deploy triplet. A larger metasim host is
-not needed for this boundary test; the local bare-metal run already separates
-generated-model semantics from F2 implementation behavior.
+- 1p1c AGFI: FireSim `91888035e601638b356f98aa70793b4005cbf653`
+- 6p2c AGFI: FireSim `f2beb072ebdb6a6f4e189ff5d9234e25de3be60d`
 
-## Why 1p1c TargetCycleDebug Works But 6p2c F2 Does Not
+The FireSim diff between those commits is not a driver/RTL/source-flow change.
+It only:
 
-The 1p1c and 6p2c hardware-debug build recipes use the same FireSim platform
-configuration:
+- updates the 1p1c hwdb AGFI from an older value to
+  `agfi-098bce7d5e0c3d937`;
+- adds a 1p1c bare-metal smoke runtime YAML.
+
+The nearby top-level Chipyard commits are:
+
+- 1p1c build launch: `650e5f55` at `2026-05-11 11:52:56 +0000`
+- 6p2c build launch/restart window: `8c72fe13` at
+  `2026-05-11 12:13:48 +0000`
+- 6p2c AGFI build completion window: `eb0e5401` at
+  `2026-05-11 17:06:44 +0000`
+
+From `650e5f55` to `eb0e5401`, the hardware-relevant submodules checked in at
+the top level stayed fixed except for `sims/firesim` and `generators/gemmini`:
+
+- unchanged: `fpga/fpga-shells`, `generators/rocket-chip`,
+  `generators/testchipip`, `generators/diplomacy`,
+  `generators/rocket-chip-blocks`, `generators/rocket-chip-inclusive-cache`;
+- `sims/firesim` moved from `91888035` to `f2beb072`, but that diff is only
+  the 1p1c hwdb/runtime change described above;
+- `generators/gemmini` moved from `aa4cbc4` to `3f03088`.
+
+The `generators/gemmini` diff is also not a hardware-source change. It only
+moves `software/gemmini-rocc-tests`; the rocc-tests diff from the 1p1c build
+pointer to the 6p2c build pointer modifies one markdown note:
+
+- `pipeline-runtime/docs/testing/custom_instruction_debug_strategy_20260510.md`
+
+No Scala/Chisel, C/C++, FireSim driver, FPGA shell, Rocket, TestChipIP, or
+Gemmini hardware source changed in this time window in a way that explains the
+6p2c failure. This is why the generated RTL and reports below are stronger
+evidence than the commit messages.
+
+Current `sims/firesim` has later repository-structure changes after `f2beb072`
+including the in-tree F2 AWS shell conversion. Those later changes were not in
+the two AGFIs above. They matter for future rebuild reproducibility, but they
+are not the cause of the already-created 6p2c AGFI failure.
+
+## Source Boundary
+
+The preflight/fingerprint path is not a full simulation-health test. In
+`simulation_t::execute_simulation_flow()`, FireSim waits for init and checks the
+master widget fingerprint before DRAM load and bridge init. Passing this only
+proves that the manager can reach the master widget over the control path.
+
+The first real simulation step is in `firesim_top_t::simulation_run()`:
+
+- before the first step, driver debug reads `clock.tcycle()`, `clock.hcycle()`,
+  and `peek_poke.is_done()`;
+- then it writes `peek_poke.step(step_size, false)`;
+- it polls `peek_poke.is_done()` while ticking bridge drivers.
+
+The generated source says what those pre-step values should be:
+
+- `PeekPokeBridgeModule` initializes `cycleHorizon` to zero and drives
+  `DONE := cycleHorizon === 0.U`, so a healthy model should read `DONE=1`
+  before the first step.
+- `ClockBridgeModule` increments `hCycle` every host-model clock after reset,
+  so a healthy FPGA after init should read a nonzero `hCycle`.
+
+Observed values:
+
+- 6p2c F2 reads `DONE=0`, `tcycle=0`, `hcycle=0` before the first step and never
+  advances.
+- 6p2c metasim reads healthy pre-step state and runs hello.
+- 1p1c F2 with TargetCycleDebug runs the smoke workload to PASS.
+
+This pins the failure below guest software and below FireSim model semantics:
+the 6p2c F2 implementation does not present valid host-control/clock/reset
+state for the generated simulator.
+
+TargetCycleDebug also does not directly observe every relevant path. In
+`FPGATop`, `hportLabels = Seq.empty`, and `ClockTokenVector.bridgeChannels()`
+returns `Seq()`. The current debug widget observes selected wire and ready-valid
+channel masks, not the ClockBridge token hPort itself. Therefore the absence of
+a TargetCycleDebug blocker dump does not prove the clock-token path or
+PeekPoke/ClockBridge control state is healthy.
+
+## Generated RTL Comparison
+
+Generated file scale:
+
+- 1p1c `FireSim-generated.sv`: 621,855 lines, 53,504,410 bytes
+- 6p2c `FireSim-generated.sv`: 2,993,299 lines, 240,935,449 bytes
+- 1p1c `FireSim-generated.const.h`: 10,554 lines, 593,230 bytes
+- 6p2c `FireSim-generated.const.h`: 45,517 lines, 2,470,702 bytes
+- synthesized assertion label matches in generated headers:
+  1p1c 1,982 matches, 6p2c 10,509 matches
+
+Module-level hashes from the generated RTL:
+
+| Module | 1p1c vs 6p2c |
+| --- | --- |
+| `SimulationMaster` | identical, 210 lines each |
+| `PeekPokeBridgeModule` | identical, 384 lines each |
+| `ClockBridgeModule` | identical, 335 lines each |
+| `TargetCycleDebugWidget` | identical, 20,959 lines each |
+| `F1Shim` | identical, 1,087 lines each |
+| `AssertBridgeModule` | different, 3,908 lines vs 20,977 lines |
+| `PrintBridgeModule` | different, 1,507 lines vs 5,374 lines |
+| `FPGATop` | different, 108,773 lines vs 1,834,237 lines |
+| `FireSim` | different, 13,715 lines vs 56,943 lines |
+
+This is the key comparison: the failing host-control widget definitions are not
+different between 1p1c and 6p2c. The large differences are the 6p2c target
+logic and the debug collateral around asserts/printfs/top-level FAME wiring.
+
+## Utilization and Timing
+
+Both build recipes use the same platform settings:
 
 - `WithTargetCycleDebug_WithPrintfSynthesis_WithSynthAsserts_FRFCFS16GBQuadRank_BaseF2Config`
 - `fpga_frequency: 20`
 - `build_strategy: TIMING`
 
-The target configurations differ only in the Gemmini/ReRoCC target size:
+Post-synth top utilization:
 
-- 1p1c:
-  `FireSimGemminiReRoCCPairDummy8x8C1P1Sbus64NICDebugConfig`
-- 6p2c:
-  `FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64NICDebugConfig`
+| Build | Total LUTs | FFs | DSP |
+| --- | ---: | ---: | ---: |
+| 1p1c | 370,529 (28.42%) | 197,708 (7.58%) | 179 (1.98%) |
+| 6p2c | 809,835 (62.12%) | 450,821 (17.29%) | 999 (11.07%) |
 
-The runtime evidence also differs before any guest software can matter:
+Important hierarchy rows:
 
-- 1p1c F2 TargetCycleDebug run:
-  `TARGETCYCLE DEBUG [tick] ... hcycle=1187939002 ...` and
-  `*** PASSED *** after 44104832 cycles`.
-- 6p2c F2 TargetCycleDebug run:
-  `FIRESIM DRIVER DEBUG [before_step] step=0 ... done=0 tcycle=0 hcycle=0`,
-  then heartbeat terminates at target cycle 0.
-- 6p2c exact local metasim:
-  `FIRESIM DRIVER DEBUG [before_step] step=0 ... done=1 tcycle=0 hcycle=7546`,
-  then `*** PASSED *** after 31874 cycles`.
+| Instance/module | 1p1c LUTs/FFs/DSP | 6p2c LUTs/FFs/DSP |
+| --- | ---: | ---: |
+| `firesim_top` / `F1Shim` | 334,284 / 154,383 / 176 | 773,128 / 407,219 / 996 |
+| `top` / `FPGATop` | 334,284 / 154,381 / 176 | 773,128 / 407,217 / 996 |
+| `AssertBridgeModule_0` | 3,666 / 196 / 0 | 31,982 / 198 / 0 |
+| `PrintBridgeModule_0` | 1,237 / 7,987 / 0 | 24,651 / 37,903 / 0 |
+| `TargetCycleDebugWidget_0` | 25,869 / 46,626 / 0 | 25,989 / 46,626 / 0 |
+| `ClockBridgeModule_0` | 83 / 269 / 0 | 77 / 269 / 0 |
+| `PeekPokeBridgeModule_0` | 272 / 275 / 0 | 271 / 275 / 0 |
+| `SimulationMaster_0` | 130 / 177 / 0 | 128 / 177 / 0 |
 
-The source makes this distinction precise:
+Timing:
 
-- `PeekPokeBridgeModule` initializes `cycleHorizon` to zero and drives `DONE`
-  from `cycleHorizon === 0`. Before the first driver step, a healthy model
-  should read `DONE=1`. The 6p2c metasim does; the 6p2c F2 AGFI reads `DONE=0`.
-- `ClockBridgeModule` increments `hCycle` unconditionally on every host-model
-  clock after reset. The 6p2c metasim reads a nonzero `hCycle`; the 6p2c F2 AGFI
-  reads zero repeatedly.
-- `SimulationMaster`, `PeekPokeBridgeModule`, and `ClockBridgeModule` are wired
-  to the same generated `clock` and `reset` in `F1Shim`. `wait_for_init()` and
-  fingerprint readback prove the top-level control path can reach at least the
-  master widget, but the downstream host-control register state for
-  PeekPoke/ClockBridge is already invalid before workload execution.
+- 1p1c final post-route phys-opt:
+  `WNS=-1.838 | TNS=-2322.467 | WHS=-3.595 | THS=-5160.769`
+- 6p2c final post-route phys-opt:
+  `WNS=-2.005 | TNS=-3043.743 | WHS=-3.631 | THS=-2048.133`
+- Both produced `post_route.VIOLATED.dcp`, and the 1p1c violated checkpoint
+  still passes the smoke workload. So the existence of a timing violation alone
+  is not a sufficient explanation.
+- The 6p2c route log additionally reports timing congestion level 6:
+  `Congestion levels of 5 and greater may impact timing closure`.
+- Worst visible timing paths are mostly shell DDR/reset/status or clock-domain
+  paths, for example `WRAPPER/CL/SH_DDR/SYNC_RST/...` and
+  `WRAPPER/CL/PIPE_DDR_STAT_*`; many endpoints are hidden by shell collateral.
 
-So the current root-cause boundary is not "TargetCycleDebug breaks 6p2c".
-TargetCycleDebug is present in the passing 1p1c AGFI and in the passing 6p2c
-metasim. The failing object is this 6p2c F2 implementation/AGFI: the host
-control state needed to start simulation is not reliable on FPGA.
+The reports do not expose a single exact failing `ClockBridge` or `PeekPoke`
+register path. The stronger evidence is the runtime/code mismatch: the same
+generated host-control modules simulate correctly, but their FPGA readback state
+is already invalid before step 0 on the 6p2c AGFI.
 
-The most plausible implementation-level reason is timing/resource pressure:
+## Root-Cause Boundary
 
-- 1p1c post-synth utilization:
-  `370529 LUTs (28.42%), 197708 FFs (7.58%), DSP 179 (1.98%)`.
-- 6p2c post-synth utilization:
-  `809835 LUTs (62.12%), 450821 FFs (17.29%), DSP 999 (11.07%)`.
-- Both builds produced `post_route.VIOLATED.dcp`, so the presence of a violated
-  checkpoint alone is not the explanation.
-- The 6p2c build has worse final setup/TNS:
-  `WNS=-2.005 | TNS=-3043.743`, versus 1p1c
-  `WNS=-1.838 | TNS=-2322.467`.
-- Vivado reported the 6p2c post-route/post-phys-opt violation as too large for
-  post-route physical optimization to recover, and the failing paths include
-  shell DDR/reset/status clock-domain paths such as
-  `WRAPPER/CL/SH_DDR/SYNC_RST/... -> WRAPPER/CL/SH_DDR/ddr_stat...`.
+Pinned root-cause boundary:
 
-Those reported worst paths are not the exact ClockBridge register itself, but
-the runtime symptom proves the generated model is not functioning correctly
-after F2 implementation. The correct working conclusion is: 6p2c plus this
-debug-heavy platform mix produces a bad F2 bitstream; 1p1c with the same
-TargetCycleDebug feature remains small enough to work despite unrelated shell
-timing violations.
+- Not pipeline-runtime mapping: no target cycle executes.
+- Not Linux/rootfs/workload: bare-metal hello fails at target cycle 0 on F2.
+- Not `doneflag` or DMA completion: no DMA workload is reached.
+- Not driver/AGFI recipe mismatch: fingerprint/preflight reaches the expected
+  FireSim master widget, and the hwdb points at the tested AGFI.
+- Not FireSim or other repo source drift between build times: build-window diffs
+  are config/docs/submodule-pointer changes, not hardware or driver logic.
+- Not TargetCycleDebug alone: 1p1c with TargetCycleDebug passes, and 6p2c
+  TargetCycleDebug metasim passes.
 
-## Recommended Next Test Plan
+Most likely cause:
+
+The 6p2c target plus synthesized assert/printf/debug collateral creates a much
+larger and more congested F2 implementation. That implementation does not
+reliably deliver the host-control/clock/reset state required by the generated
+simulator, even though the generated RTL semantics are valid. The exact physical
+path still needs targeted instrumentation because Vivado hides or reports
+mostly shell/reset/status path names, but the code and run evidence already pin
+the problem to the implemented 6p2c FPGA image rather than to guest software or
+FireSim model logic.
+
+## Should We Rebuild 6p2c From the 1p1c Commit?
+
+Rebuilding 6p2c after checking out the exact 1p1c build-time repository state
+is not the best first move. The build-window diff does not contain a plausible
+hardware or driver source change:
+
+- FireSim changed only 1p1c hwdb/runtime YAML.
+- Chipyard changed only submodule pointers for FireSim and Gemmini.
+- Gemmini changed only the `gemmini-rocc-tests` submodule pointer.
+- `gemmini-rocc-tests` changed only a pipeline-runtime markdown note.
+- FPGA shell, Rocket, TestChipIP, Diplomacy, Rocket-chip-blocks, and inclusive
+  cache submodule pointers were unchanged.
+
+So a 6p2c rebuild from the 1p1c top-level commit should generate essentially
+the same hardware input for the 6p2c target, aside from incidental build-flow
+environment effects. It can be used as a reproducibility control later, but it
+is unlikely to fix the target-cycle-0 failure by itself.
+
+The higher-value rebuild is a 6p2c diagnostic AGFI from the current consistent
+recipe/hwdb state, preserving TargetCycleDebug/synth printf/synth asserts, with
+extra narrow readback of reset, ClockBridge, PeekPoke, and the control bus. That
+directly tests the failing pre-step state instead of hoping that a commit reset
+changes an implementation-level symptom.
+
+## Next Test Plan
 
 1. Do not run Linux or pipeline-runtime mapping on
-   `agfi-0d0fc22b1ba532727`; it fails before the first target cycle.
-2. Rebuild a 6p2c F2 isolation AGFI with the same target config but without
-   `WithTargetCycleDebug`, keeping the rest of the platform as close as
-   possible. This answers whether TargetCycleDebug's added debug fanout is the
-   tipping point for the large target.
-3. If that still fails, rebuild a lean 6p2c AGFI without
-   `WithPrintfSynthesis`/`WithSynthAsserts` as well. This checks whether debug
-   collateral and generated assertion/printf fabric are what push placement and
-   routing over the edge.
-4. For every rebuilt AGFI, run the same bare-metal hello smoke first with
-   `+firesim-driver-debug`. The required pass condition is:
-   pre-step `DONE=1`, nonzero `hCycle`, target-cycle advancement, and
-   `*** PASSED ***`.
-5. Only after a 6p2c F2 AGFI passes bare-metal hello should pipeline-runtime
-   mapping and DMA tests be attempted.
+   `agfi-0d0fc22b1ba532727`; it fails before step 0 completes.
+2. Rebuild a 6p2c diagnostic AGFI that preserves the existing hardware debug
+   structures, including TargetCycleDebug, synth printf, and synth asserts.
+3. Add a minimal always-on diagnostic readback path near the host-control
+   boundary. The useful signals are reset released state, ClockBridge `hCycle`,
+   ClockBridge token fire/valid/ready, PeekPoke `cycleHorizon`, PeekPoke `DONE`,
+   and a small control-bus sanity register outside the large target fabric.
+4. Run the same diagnostic on a 1p1c control AGFI and on 6p2c. Required
+   pre-step pass condition: `DONE=1`, nonzero `hCycle`, and a visible clock
+   token stream before the first driver step.
+5. If the diagnostic shows reset/control readback corruption on 6p2c, inspect
+   and adjust the F2 OCL/control/reset/floorplan constraints before changing
+   target debug features.
+6. If the diagnostic shows host-control state is healthy but the first token
+   still does not fire, instrument the first blocked FAME channels explicitly.
+   The current TargetCycleDebug mask is not enough because it does not observe
+   ClockBridge hPort channels.
+7. Only after a 6p2c F2 AGFI passes bare-metal hello with driver debug should
+   pipeline-runtime mapping and DMA tests be attempted. DMA completion evidence
+   must use `hw_dma_fence()` / blocking wait, not doneflag polling.
 
-
-## Pipeline Runtime Decision
-
-Do not generate or validate 6p mapping on this AGFI yet. The bitstream is not
-usable for pipeline runtime until a bare-metal hello smoke advances target
-cycles and reports FireSim `*** PASSED ***`.
+Removing TargetCycleDebug is not the primary fix. A no-debug or reduced-debug
+build can still be useful later as an isolation A/B, but the main debugging path
+should preserve the hardware debug structures and add narrower diagnostics that
+pin the first bad reset/clock/control condition.
