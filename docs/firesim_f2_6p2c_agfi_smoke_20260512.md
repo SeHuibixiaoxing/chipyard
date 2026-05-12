@@ -318,3 +318,56 @@ Removing TargetCycleDebug is not the primary fix. A no-debug or reduced-debug
 build can still be useful later as an isolation A/B, but the main debugging path
 should preserve the hardware debug structures and add narrower diagnostics that
 pin the first bad reset/clock/control condition.
+
+## Diagnostic Rebuild Plan
+
+The next rebuilds preserve the existing hardware-debug structures:
+
+- `WithTargetCycleDebug`
+- `WithPrintfSynthesis`
+- `WithSynthAsserts`
+- `WithRocketSynthPCDebug` in the NIC target configs
+
+They add a separate `WithHostControlDebug` platform config. This does not remove
+or weaken the existing debug path. It adds four read-only ClockBridge words and
+four read-only PeekPoke words, then gates host-side printing with
+`+firesim-host-control-debug`.
+
+The probe address calculation is pinned to FireSim code, not inferred from
+logs:
+
+- `WidgetMMIO` and `FPGATop` require `CtrlNastiKey.dataBits == 32`, and
+  `simif_t::read()` is a 32-bit MMIO read.
+- `MCRFileMap.allocate()` assigns each attached register at
+  `bytesPerAddress * name2addr.size`, so with a 32-bit control bus each attach
+  advances the address by 4 bytes.
+- `ClockBridgeModule` allocates `hCycle_0`, `hCycle_1`, `hCycle_latch`,
+  `tCycle_0`, `tCycle_1`, and `tCycle_latch` before the new host-control debug
+  attaches. The C++ ClockBridge debug reads therefore start at
+  `tCycle_latch + 4`.
+- `PeekPokeBridgeModule` allocates `PRECISE_PEEKABLE` after all port registers
+  and immediately before the new host-control debug attaches. The C++ PeekPoke
+  debug reads therefore start at `PRECISE_PEEKABLE + 4`.
+
+Three comparable F2 diagnostic builds are prepared:
+
+| Scale | Build config | Build recipe | Builder |
+| --- | --- | --- | --- |
+| 1p1c | `config_build_f2_gemmini_rerocc_pairmanager_dummy8x8_1c1p1_sbus64_nic_hwdebug_hostdebug_m8i.yaml` | `config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_1c1p1_sbus64_nic_hwdebug_hostdebug.yaml` | `m8i.2xlarge` |
+| 4p2c | `config_build_f2_gemmini_rerocc_pairmanager_dummy8x8_2c4p4_sbus64_nic_hwdebug_hostdebug.yaml` | `config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_2c4p4_sbus64_nic_hwdebug_hostdebug.yaml` | `z1d.3xlarge` |
+| 6p2c | `config_build_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug.yaml` | `config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug.yaml` | `z1d.3xlarge` |
+
+The 4p2c target is intentionally the same 8x8 dummy Gemmini, sbus64, two-core,
+NIC hardware-debug family as 6p2c. It uses `numPairs = 4`, `pairX = 2`,
+`pairY = 2`, and keeps the 6p2c queue-depth settings
+`pairTlMaxInFlight = Some(64)` and `pairAtlMaxInFlight = Some(64)` so the A/B
+primarily varies target size instead of queue policy.
+
+Required first smoke after any AGFI becomes available:
+
+1. update hwdb to the new AGFI/AFI;
+2. rerun `firesim infrasetup`;
+3. run `hello-baremetal.json` with
+   `+firesim-driver-debug +firesim-host-control-debug +targetcycle-debug=1`;
+4. accept only if pre-step state shows `PeekPoke DONE=1`,
+   `ClockBridge hCycle != 0`, and a sane ClockBridge token status.

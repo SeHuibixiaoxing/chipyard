@@ -15,6 +15,7 @@
 #include "core/systematic_scheduler.h"
 
 #include <cinttypes>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 
@@ -37,6 +38,8 @@ uint64_t get_uint64_arg(const std::vector<std::string> &args,
   }
   return default_value;
 }
+
+uint32_t bit(uint32_t value, unsigned idx) { return (value >> idx) & 1u; }
 
 const char *bridge_name(bridge_driver_t *bridge) {
   if (dynamic_cast<heartbeat_t *>(bridge))
@@ -78,6 +81,13 @@ private:
   /// Optional, plusarg-gated driver progress logging for FPGA hangs.
   bool driver_debug = false;
   uint64_t driver_debug_interval = 1000000;
+  bool host_control_debug = false;
+
+  void print_host_control_debug(const char *phase,
+                                uint64_t step_count,
+                                uint64_t poll_count,
+                                uint64_t total_poll_count,
+                                clockmodule_t &clock);
 };
 
 firesim_top_t::firesim_top_t(simif_t &simif,
@@ -110,6 +120,12 @@ firesim_top_t::firesim_top_t(simif_t &simif,
             "FIRESIM DRIVER DEBUG enabled interval=%" PRIu64 "\n",
             driver_debug_interval);
   }
+  host_control_debug = has_arg(args, "+firesim-host-control-debug");
+  if (host_control_debug) {
+    fprintf(stderr,
+            "FIRESIM HOST CONTROL DEBUG enabled interval=%" PRIu64 "\n",
+            driver_debug_interval);
+  }
 
   registry.add_widget(
       new heartbeat_t(simif, registry.get_widget<clockmodule_t>(), args));
@@ -126,6 +142,55 @@ firesim_top_t::firesim_top_t(simif_t &simif,
           return *profile_interval;
         });
   }
+}
+
+void firesim_top_t::print_host_control_debug(const char *phase,
+                                             uint64_t step_count,
+                                             uint64_t poll_count,
+                                             uint64_t total_poll_count,
+                                             clockmodule_t &clock) {
+  const uint32_t pp_status = peek_poke.debug_status();
+  const uint32_t clk_status = clock.debug_status();
+  fprintf(stderr,
+          "FIRESIM HOST CONTROL DEBUG [%s] step=%" PRIu64
+          " poll=%" PRIu64 " total_poll=%" PRIu64
+          " pp_cycle_horizon=%" PRIu32
+          " pp_status=0x%08" PRIx32
+          "(step_valid=%" PRIu32 " step_ready=%" PRIu32
+          " step_fire=%" PRIu32 " done=%" PRIu32
+          " advance=%" PRIu32 " reset=%" PRIu32 ")"
+          " pp_decoupling_mask_lo=0x%08" PRIx32
+          " pp_decoupling_count=%" PRIu32
+          " clk_status=0x%08" PRIx32
+          "(valid=%" PRIu32 " ready=%" PRIu32
+          " fire=%" PRIu32 " any_token=%" PRIu32
+          " reset=%" PRIu32 ")"
+          " clk_token_fire_count=%" PRIu32
+          " clk_token_bits_lo=0x%08" PRIx32
+          " clk_num_clocks=%" PRIu32 "\n",
+          phase,
+          step_count,
+          poll_count,
+          total_poll_count,
+          peek_poke.debug_cycle_horizon(),
+          pp_status,
+          bit(pp_status, 0),
+          bit(pp_status, 1),
+          bit(pp_status, 2),
+          bit(pp_status, 3),
+          bit(pp_status, 4),
+          bit(pp_status, 5),
+          peek_poke.debug_decoupling_mask_lo(),
+          peek_poke.debug_decoupling_count(),
+          clk_status,
+          bit(clk_status, 0),
+          bit(clk_status, 1),
+          bit(clk_status, 2),
+          bit(clk_status, 3),
+          bit(clk_status, 4),
+          clock.debug_token_fire_count(),
+          clock.debug_token_bits_lo(),
+          clock.debug_num_clocks());
 }
 
 int firesim_top_t::simulation_run() {
@@ -150,13 +215,17 @@ int firesim_top_t::simulation_run() {
               before_tcycle,
               before_hcycle);
     }
+    if (host_control_debug) {
+      print_host_control_debug("before_step", step_count, 0, total_poll_count, clock);
+    }
     peek_poke.step(step_size, false);
     uint64_t poll_count = 0;
     while (!peek_poke.is_done() && !terminated) {
       poll_count++;
       total_poll_count++;
-      if (driver_debug && (poll_count == 1 ||
-                           (poll_count % driver_debug_interval) == 0)) {
+      const bool log_this_poll =
+          poll_count == 1 || (poll_count % driver_debug_interval) == 0;
+      if (driver_debug && log_this_poll) {
         fprintf(stderr,
                 "FIRESIM DRIVER DEBUG [poll] step=%" PRIu64
                 " poll=%" PRIu64 " total_poll=%" PRIu64
@@ -166,6 +235,9 @@ int firesim_top_t::simulation_run() {
                 total_poll_count,
                 clock.tcycle(),
                 clock.hcycle());
+      }
+      if (host_control_debug && log_this_poll) {
+        print_host_control_debug("poll", step_count, poll_count, total_poll_count, clock);
       }
       for (auto *bridge : registry.get_all_bridges()) {
         bridge->tick();
@@ -186,6 +258,10 @@ int firesim_top_t::simulation_run() {
                     clock.tcycle(),
                     clock.hcycle());
           }
+          if (host_control_debug) {
+            print_host_control_debug(
+                "terminate", step_count, poll_count, total_poll_count, clock);
+          }
           break;
         }
       }
@@ -204,6 +280,9 @@ int firesim_top_t::simulation_run() {
               terminated ? 1 : 0,
               clock.tcycle(),
               clock.hcycle());
+    }
+    if (host_control_debug) {
+      print_host_control_debug("after_step", step_count, poll_count, total_poll_count, clock);
     }
     step_count++;
   }
