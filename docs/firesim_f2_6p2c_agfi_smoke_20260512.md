@@ -439,6 +439,7 @@ Three comparable F2 diagnostic builds are prepared:
 | 1p1c | `config_build_f2_gemmini_rerocc_pairmanager_dummy8x8_1c1p1_sbus64_nic_hwdebug_hostdebug_m8i.yaml` | `config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_1c1p1_sbus64_nic_hwdebug_hostdebug.yaml` | `m8i.2xlarge` |
 | 4p2c | `config_build_f2_gemmini_rerocc_pairmanager_dummy8x8_2c4p4_sbus64_nic_hwdebug_hostdebug.yaml` | `config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_2c4p4_sbus64_nic_hwdebug_hostdebug.yaml` | `z1d.3xlarge` |
 | 6p2c | `config_build_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug.yaml` | `config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug.yaml` | `z1d.3xlarge` |
+| 6p2c fallback | `config_build_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug_m8i8.yaml` | `config_build_recipes_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug.yaml` | `m8i.8xlarge` |
 
 The 4p2c target is intentionally the same 8x8 dummy Gemmini, sbus64, two-core,
 NIC hardware-debug family as 6p2c. It uses `numPairs = 4`, `pairX = 2`,
@@ -484,6 +485,10 @@ Build-memory observation from the diagnostic rebuild:
   `launch_instances_timeout_minutes` in `AWSEC2` and forwarding it to
   `launch_instances()`. The hostdebug 1p1c/4p2c/6p2c build configs now set a
   60-minute retry window.
+- Because `z1d.3xlarge` continued to have no immediate capacity, a separate
+  6p2c fallback build config uses `m8i.8xlarge`. This changes only the remote
+  Vivado builder instance type and build-farm tag; it does not change the
+  FireSim build recipe, target config, platform config, or generated RTL.
 
 Pipeline-runtime mapping preparation:
 
