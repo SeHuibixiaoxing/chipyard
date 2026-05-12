@@ -571,3 +571,45 @@ Required first smoke after any AGFI becomes available:
    `+firesim-driver-debug +firesim-host-control-debug +targetcycle-debug=1`;
 4. accept only if pre-step state shows `PeekPoke DONE=1`,
    `ClockBridge hCycle != 0`, and a sane ClockBridge token status.
+
+6p2c pipeline-runtime workload preparation:
+
+- The older checked-in `g6` runtime config is not a valid 2c6p6/sbus64/NIC
+  test entry. It points at
+  `firesim_gemmini_rerocc_pairmanager_dummy16x16_4c12p12_sbus128` and uses the
+  `rerocc_globalnoc_pairmanager_dummy16x16_c4_g6_d6_..._sbus128` target key.
+  Using it on the new 2c6p6 AGFI would mix the old 12-pair/sbus128 software
+  shape with a 6-pair/sbus64 hardware image.
+- A separate 2c6p6 workload profile was added:
+  `pairdummy_sbus64_dummy8x8_g6_fixed_env.sh`. It pins
+  `TARGET_KEY=rerocc_globalnoc_pairmanager_dummy8x8_c2_g6_d6_spad1024kb_dram19_noc64_mac64_sbus64`,
+  `NUM_CORES=2`, `NUM_GEMMINI=6`, `NUM_DMA=6`,
+  `PAIR_MANAGER_MODE=1`, and `PAGES_PER_ACC=1024`.
+- The new non-interactive workflow is
+  `pairdummy_sbus64_dummy8x8_g6_hwdebug_workflow.sh`. It uses the hostdebug
+  runtime config
+  `config_runtime_f2_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug_linux_bertmini_pipeline_runtime_batch8_fileonly_sync.yaml`
+  and the future hwdb key
+  `firesim_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug_hostdebug`.
+- `debug-preflight` passed for this profile with
+  `dma_force_direct_enable=1`, `dma_blocking_wait_poll_timeout_enable=0`,
+  `no_dma_compute_enable=0`, and all heavy debug probes disabled. This keeps
+  `hw_dma_fence()` / blocking wait as the DMA completion authority and does not
+  reintroduce doneflag polling.
+- FireMarshal image closure completed on May 12, 2026:
+
+  ```sh
+  generators/gemmini/software/gemmini-rocc-tests/pipeline-runtime/scripts/pairdummy_sbus64_dummy8x8_g6_hwdebug_workflow.sh image-closure
+  ```
+
+  It ran clean/build/install, patched `/firemarshal.env`, and passed local image
+  freshness for workload
+  `rerocc-lc-linux-coupleddma-bertmini-pipeline-runtime-batch8-fileonly-sync-pairdummy-sbus64-dummy8x8-g6`.
+  The rendered env sha256 was
+  `e6752ae1f8aedd8fe4ee3d564a1e34ba869d5336a5c63bc829b3a3f39aae586e`; the
+  runtime binary sha256 inside the image was
+  `0d126d06d4186316961aff539e9f72670fe8eabbd13a457a79172842f87e3a56`.
+- The rootfs, bootbinary, copied overlay binaries, and generated
+  `/firemarshal.env` are build artifacts and are intentionally not committed.
+  The source profile/workload files and FireSim runtime configs are the
+  reproducible inputs.
