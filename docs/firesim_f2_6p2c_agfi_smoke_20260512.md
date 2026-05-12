@@ -266,6 +266,67 @@ mostly shell/reset/status path names, but the code and run evidence already pin
 the problem to the implemented 6p2c FPGA image rather than to guest software or
 FireSim model logic.
 
+## Software Path Check
+
+The failing 6p2c F2 run and the passing 6p2c metasim run use the same runtime
+hardware config and deploy quintuplet:
+
+- `RuntimeHWConfig:
+  firesim_gemmini_rerocc_pairmanager_dummy8x8_2c6p6_sbus64_nic_hwdebug`
+- `DeployQuintuplet:
+  f2-firesim-FireSim-FireSimGemminiReRoCCPairDummy8x8C2P6Sbus64NICDebugConfig-WithTargetCycleDebug_WithPrintfSynthesis_WithSynthAsserts_FRFCFS16GBQuadRank_BaseF2Config`
+
+The F2 hwdb entry for that config has no deploy override:
+
+- `agfi: agfi-0d0fc22b1ba532727`
+- `deploy_quintuplet_override: null`
+- `custom_runtime_config: null`
+
+The failed F2 `sim-run.sh` invokes `./FireSim-f2` with
+`+prog0=hello-baremetal0-hello.riscv`; the passing metasim invokes
+`./VFireSim` with the same program and the same normal passthrough debug args.
+The metasim-only differences are `+max-cycles=5000000` and
+`+fesvr-step-size=128`.
+
+Those metasim-only args cannot explain the bad pre-step F2 state:
+
+- `systematic_scheduler_t` initializes `default_step_size` to
+  `MAX_MIDAS_STEP = 2^32 - 1`.
+- Its constructor parses `+max-cycles=...`, but not `+fesvr-step-size=...`.
+- `firesim_top_t::simulation_run()` calls `get_largest_stepsize()`, then
+  reads `clock.tcycle()`, `clock.hcycle()`, and `peek_poke.is_done()` for the
+  `FIRESIM DRIVER DEBUG [before_step]` line, and only after that calls
+  `peek_poke.step(step_size, false)`.
+
+Therefore the observed F2 line
+`before_step ... done=0 tcycle=0 hcycle=0` is not caused by the value written to
+`STEP`; it is read before any `STEP` write in that loop.
+
+The FireSim fingerprint is also deliberately narrow. In
+`simulation_t::execute_simulation_flow()`, the flow waits for
+`master.is_init_done()` and checks `master.check_fingerprint()`. In the Scala
+`SimulationMaster`, those are the master widget's `INIT_DONE` and
+`PRESENCE_READ` registers. This proves the OCL/control path can reach the
+master widget, but it does not prove the PeekPoke or ClockBridge registers have
+healthy state.
+
+The generated old 1p1c and 6p2c driver headers agree on the relevant
+host-control register layout:
+
+- `PEEKPOKEBRIDGEMODULE`: `STEP = 9228`, `DONE = 9232`,
+  `PRECISE_PEEKABLE = 9240`
+- `CLOCKBRIDGEMODULE`: `hCycle_0 = 9280`, `hCycle_1 = 9284`,
+  `hCycle_latch = 9288`, `tCycle_0 = 9292`, `tCycle_1 = 9296`,
+  `tCycle_latch = 9300`
+- `SIMULATIONMASTER`: `INIT_DONE = 9376`, `PRESENCE_READ = 9380`,
+  `PRESENCE_WRITE = 9384`
+
+This makes a basic C++ struct/offset mismatch between those two old builds an
+unlikely root cause for `done=0/hcycle=0`. It also explains why the new
+diagnostic build adds direct PeekPoke/ClockBridge status words: the existing
+fingerprint path validates only the master widget, and TargetCycleDebug does not
+observe the ClockBridge token hPort.
+
 ## Should We Rebuild 6p2c From the 1p1c Commit?
 
 Rebuilding 6p2c after checking out the exact 1p1c build-time repository state
