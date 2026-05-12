@@ -10,9 +10,6 @@
 [submodule "generators/caliptra-aes-acc"]
 	path = generators/caliptra-aes-acc
 	url = https://github.com/ucb-bar/caliptra-aes-acc.git
-[submodule "generators/constellation"]
-	path = generators/constellation
-	url = https://github.com/ucb-bar/constellation.git
 [submodule "generators/cva6"]
 	path = generators/cva6
 	url = https://github.com/ucb-bar/cva6-wrapper.git
@@ -70,9 +67,6 @@
 [submodule "software/embench/embench-iot"]
 	path = software/embench/embench-iot
 	url = https://github.com/embench/embench-iot.git
-[submodule "software/firemarshal"]
-	path = software/firemarshal
-	url = https://github.com/firesim/FireMarshal.git
 [submodule "software/nvdla-workload"]
 	path = software/nvdla-workload
 	url = https://github.com/ucb-bar/nvdla-workload.git
@@ -82,21 +76,25 @@
 [submodule "toolchains/libgloss"]
 	path = toolchains/libgloss
 	url = https://github.com/ucb-bar/libgloss-htif.git
+	ignore = untracked
 [submodule "toolchains/riscv-tools/riscv-isa-sim"]
 	path = toolchains/riscv-tools/riscv-isa-sim
 	url = https://github.com/riscv-software-src/riscv-isa-sim.git
+	ignore = untracked
 [submodule "toolchains/riscv-tools/riscv-openocd"]
 	path = toolchains/riscv-tools/riscv-openocd
 	url = https://github.com/riscv/riscv-openocd.git
 [submodule "toolchains/riscv-tools/riscv-pk"]
 	path = toolchains/riscv-tools/riscv-pk
 	url = https://github.com/riscv-software-src/riscv-pk.git
+	ignore = untracked
 [submodule "toolchains/riscv-tools/riscv-spike-devices"]
 	path = toolchains/riscv-tools/riscv-spike-devices
 	url = https://github.com/ucb-bar/spike-devices.git
 [submodule "toolchains/riscv-tools/riscv-tests"]
 	path = toolchains/riscv-tools/riscv-tests
 	url = https://github.com/riscv-software-src/riscv-tests.git
+	ignore = untracked
 [submodule "toolchains/riscv-tools/riscv-tools-feedstock"]
 	path = toolchains/riscv-tools/riscv-tools-feedstock
 	url = https://github.com/ucb-bar/riscv-tools-feedstock.git
@@ -145,3 +143,22 @@
 [submodule "generators/vexiiriscv"]
 	path = generators/vexiiriscv
 	url = https://github.com/ucb-bar/vexiiriscv-tile.git
+[submodule "generators/constellation/src/main/resources/csrc/netrace"]
+	path = generators/constellation/src/main/resources/csrc/netrace
+	url = https://github.com/booksim/netrace.git
+[submodule "software/firemarshal/boards/default/linux"]
+	path = software/firemarshal/boards/default/linux
+	url = https://github.com/firesim/linux.git
+[submodule "software/firemarshal/boards/default/firmware/opensbi"]
+	path = software/firemarshal/boards/default/firmware/opensbi
+	url = https://github.com/riscv/opensbi.git
+[submodule "software/firemarshal/boards/default/distros/br/buildroot"]
+	path = software/firemarshal/boards/default/distros/br/buildroot
+	url = https://github.com/buildroot/buildroot.git
+	ignore = untracked
+[submodule "software/firemarshal/wlutil/busybox"]
+	path = software/firemarshal/wlutil/busybox
+	url = https://github.com/mirror/busybox.git
+[submodule "software/firemarshal/boards/firechip/drivers/iceblk-driver"]
+	path = software/firemarshal/boards/firechip/drivers/iceblk-driver
+	url = https://github.com/firesim/iceblk-driver.git

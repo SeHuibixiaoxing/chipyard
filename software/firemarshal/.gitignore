@@ -1,0 +1,14 @@
+*.swp
+test.log
+wlutil/_command.sh
+*__pycache__
+.doit.db*
+marshal-config.yaml
+boards/default/distros/ubuntu/rootfs.img*
+boards/default/distros/br/fakeroot-*/
+boards/default/distros/br/fakeroot_*.orig.tar.gz
+.ropeproject
+*~
+*#
+.conda-env
+.conda-lock-env

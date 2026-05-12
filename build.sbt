@@ -132,7 +132,7 @@ lazy val diplomacy = freshProject("diplomacy", file("generators/diplomacy/diplom
   .settings(Compile / scalaSource := baseDirectory.value / "diplomacy")
 
 lazy val rocketchip = freshProject("rocketchip", rocketChipDir)
-  .dependsOn(hardfloat, rocketMacros, diplomacy, cde)
+  .dependsOn(hardfloat, rocketMacros, diplomacy, cde, midas_target_utils)
   .settings(commonSettings)
   .settings(chiselSettings)
   .settings(scalaTestSettings)

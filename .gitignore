@@ -44,4 +44,13 @@ conference/HybridMapper/output/
 conference/HybridMapper/HybridMapper/test/test_Model_output/
 vivado*.jou
 vivado*.log
+.Xil/
+xsim.dir/
+xvlog.pb
+perf.data
+*.pid
+hd_visual/
+software/firemarshal/boards/default/distros/br/fakeroot-*/
+software/firemarshal/boards/default/distros/br/fakeroot_*.orig.tar.gz
 AGENTS.md
+!AGENTS.md
